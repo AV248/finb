@@ -160,7 +160,7 @@ try {
     setter.call(input, 'SmokeTester');
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
     await wait(300);
-    const create = [...window.document.querySelectorAll('button')].find(button => /Create my account/i.test(button.textContent || ''));
+    const create = [...window.document.querySelectorAll('button')].find(button => /Create my (guest )?account/i.test(button.textContent || ''));
     if (create) {
       if (create.disabled) console.log('   (create button still disabled — username state did not take)');
       create.click();
@@ -174,6 +174,12 @@ try {
   // 3. onboarding overlay appears for a fresh profile
   const guideShown = /FIRST VISIT GUIDE|STEP 1 \/ 6/i.test(bodyText());
   check('onboarding guide shows on first entry', guideShown);
+  check(
+    'a new guest profile carries the 100 Credit reserve',
+    /RESERVED BALANCE/i.test(bodyText()) && /100/.test(bodyText()),
+    bodyText().slice(0, 200),
+  );
+
   const skip = [...window.document.querySelectorAll('button')].find(button => /SKIP GUIDE/i.test(button.textContent || ''));
   if (skip) {
     skip.click();
@@ -231,6 +237,29 @@ try {
   await clickText(/^Card$/, 800);
   const froze = await clickText(/Freeze|FROZEN/i, 700);
   check('card studio freeze control responds', froze);
+
+  // 10. the Link Center converts the guest reserve on a Discord link
+  const typeInto = (element, value) => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(element, value);
+    element.dispatchEvent(new window.Event('input', { bubbles: true }));
+  };
+  await clickText(/^Bank$/, 700);
+  await clickText(/Link Center|Account/i, 700);
+  const linkField = [...window.document.querySelectorAll('input')].find(input => /discord|google handle/i.test(input.placeholder || ''));
+  const openedCenter = Boolean(linkField) && /LINK CENTER/i.test(bodyText());
+  check('the Link Center shows the reserved balance', openedCenter && /RESERVED/i.test(bodyText()), bodyText().slice(0, 220));
+  if (linkField) {
+    await clickText(/Discord · 300 usable/i, 300);
+    const doorField = [...window.document.querySelectorAll('input')].find(input => /discord handle/i.test(input.placeholder || ''));
+    if (doorField) {
+      typeInto(doorField, 'smoke_tester');
+      await wait(300);
+      await clickText(/^Link Discord$/i, 1200);
+    }
+  }
+  const linked = /Discord account/i.test(bodyText()) && /PERMANENT/i.test(bodyText());
+  check('linking Discord converts the reserve into 300 usable Credits', linked && /300/.test(bodyText()) && !/Guest_/i.test(bodyText()), bodyText().slice(0, 220));
 } catch (error) {
   check('smoke run completed', false, String(error?.message || error));
 } finally {

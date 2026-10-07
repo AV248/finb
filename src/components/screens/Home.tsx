@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { useFinb } from '@/lib/appCtx';
+import { ACCOUNT_RULES, PROVIDERS } from '@/lib/identity';
 import { BankCard } from '../BankCard';
 import { CARD_TIERS, STOCKS, TEASERS } from '@/lib/catalog';
 import { formatCompact, formatCredits, localDayKey, stageLabel } from '@/lib/economy';
@@ -124,16 +125,37 @@ export function HomeScreen() {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge tone="flame">{tier.name}</Badge>
             <Badge tone="lime">{stageLabel(user)}</Badge>
-            {user.linked ? <Badge>🔗 PLAY GAMES LINKED</Badge> : <Badge>👤 GUEST · {api.guestDaysLeft ?? 0}D LEFT</Badge>}
+            {user.linked ? <Badge tone="lime">🔗 {PROVIDERS[api.provider].label.toUpperCase()} LINKED</Badge> : <Badge>👤 GUEST · {api.guestDaysLeft ?? 0}D LEFT</Badge>}
             {user.combo.multiplier > 1 && <Badge tone="magenta">🔥 COMBO ×{user.combo.multiplier.toFixed(2)}</Badge>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <StatPill label="CREDITS" value={formatCompact(user.credits)} sub="spendable in-game" tone="flame" />
+          <StatPill label="CREDITS" value={formatCompact(api.wallet.usable)} sub="spendable in-game" tone="flame" />
+          {api.wallet.reserved > 0 && <StatPill label="RESERVED" value={formatCompact(api.wallet.reserved)} sub="link to unlock" />}
           <StatPill label="LIBERALS" value={formatCompact(user.liberals)} sub={`level ${Math.floor(user.liberals / 25) + 1}`} tone="lime" />
           <StatPill label="RECORD" value={`${user.stats.gamesWon}/${user.stats.gamesPlayed}`} sub="wins / rounds" />
         </div>
       </div>
+
+      {api.wallet.reserved > 0 && (
+        <Panel glow="flame" className="flex flex-wrap items-center justify-between gap-3 p-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-magenta-500/20 text-lg">🔒</span>
+            <div>
+              <div className="label text-magenta-500">RESERVED BALANCE</div>
+              <b className="text-sm text-cream-100">
+                {formatCompact(api.wallet.reserved)} Credits are frozen until you link a provider
+              </b>
+              <div className="text-[11px] text-white/55">
+                Google turns them into {ACCOUNT_RULES.googleWelcome} usable Credits · Discord into {ACCOUNT_RULES.discordWelcome} · {api.guestDaysLeft ?? 0} days left as a guest
+              </div>
+            </div>
+          </div>
+          <button className="btn btn-flame" onClick={() => api.navigate('more')}>
+            Open Link Center
+          </button>
+        </Panel>
+      )}
 
       {season && (
         <Panel glow="flame" className="flex flex-wrap items-center justify-between gap-3 p-3">

@@ -1,4 +1,5 @@
 /** FINB Platinum — shared domain types. Fictional game data only. */
+import type { AuthProvider } from './identity';
 
 export type CardTierId = 'regular' | 'bass' | 'gold' | 'me' | 'platinum' | 'series';
 
@@ -134,8 +135,21 @@ export interface Player {
   id: string;
   username: string;
   displayName: string;
+  /** true once a social provider is linked (permanent account) */
   linked: boolean;
+  /** which door this profile came through; 'guest' accounts expire in 90 days */
+  provider: AuthProvider;
+  /** provider-side handle/subject — the dedupe key for one-time grants */
+  providerSubject: string | null;
+  linkedAt: number | null;
+  /** handle shown in the UI (legacy field name, now provider-agnostic) */
   playGamesTag: string | null;
+  /** guest reserve: visible, unusable until the profile is linked */
+  lockedCredits: number;
+  /** the slice of `credits` that came from one-time welcome grants (not transferable) */
+  bonusCredits: number;
+  /** one-time guard so a grant can never be minted twice on this profile */
+  welcomeGrantClaimed: boolean;
   avatarSeed: string;
   credits: number;
   liberals: number;
@@ -194,6 +208,8 @@ export interface Database {
   version: number;
   players: Player[];
   currentId: string | null;
+  /** every provider handle that already claimed its welcome grant (dedupe ledger) */
+  claimedProviderSubjects: string[];
   market: MarketState;
   globalActivity: ActivityEvent[];
   claimedPlayGamesTags: string[];

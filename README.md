@@ -2,7 +2,7 @@
 
 **FINB ESTD. 2024 · Platinum edition.** A fictional, installable game-bank PWA: earn **Credits**, grow **Liberals**, climb six card tiers, and play 2–13 player party rooms. Built to feel like a native app, not a website.
 
-> **Simulation notice.** FINB is not a bank. It holds no real money, issues no real cards, performs no card processing or payments, has no Google authentication, and provides no legal protection. Credits and Liberals are game points with no cash value. All "floor members" you meet are simulated. Guest profiles expire after 90 days unless linked. This is disclosed in-app too (Documentation → Privacy → Terms → Accountability → Support).
+> **Simulation notice.** FINB is not a bank. It holds no real money, issues no real cards, performs no card processing or payments, and provides no legal protection. Linking "Google" or "Discord" is a game mechanic: no credential is ever requested, no account is verified, and real OAuth runs only if an operator enables those providers on the Supabase project. Credits and Liberals are game points with no cash value. All "floor members" you meet are simulated. Guest profiles expire after 90 days unless linked. This is disclosed in-app too (Documentation → Privacy → Terms → Accountability → Support).
 
 ---
 
@@ -49,14 +49,30 @@ Create `.env.local` from `.env.example` to switch on Supabase and/or Colyseus.
 
 ## What is in the box
 
-### Account and economy
+### Accounts and the three Credit buckets
 
-- Guest or linked profiles; guests display as `Guest_[username]` and are pruned after **90 days**.
-- Linking a Play Games tag pays a one-time **+100 Credits** (device-local claim — no Google sign-in is performed).
+Every profile keeps its balance in three explicit buckets, so the published account rules are enforced by code (see `src/lib/identity.ts`) rather than by copy:
+
+| Bucket | What it is | Spendable | Transferable |
+| --- | --- | --- | --- |
+| `credits` | usable balance (earned + welcome) | yes — games, market, businesses, cosmetics | yes, up to the earned portion |
+| `bonusCredits` | the slice of the balance minted as a one-time welcome grant | yes | **never** |
+| `lockedCredits` | guest reserve | **no — nothing touches it** | no |
+
+| Door | Welcome | Permanent | Notes |
+| --- | --- | --- | --- |
+| Guest | **100 reserved** | no — deleted after **90 days** unless linked | shown as `Guest_[username]`; the reserve is frozen until linking |
+| Google | **100 usable** | yes | the reserved 100 convert into 100 usable Credits, once |
+| Discord | **300 usable** | yes | the reserved 100 convert and a **+200** top-up is added, once |
+
+- One welcome grant **per provider account, forever**: the `(provider, handle)` pair is recorded locally and in the Supabase `provider_claims` table, whose composite primary key makes a second claim impossible even across devices.
+- Debits consume earned Credits first and welcome Credits last, so a payer never accidentally burns the non-transferable bucket.
 - Daily login **+10 Credits**, with streak bonuses at 7 (**+30**), 14 (**+75**), 30 (**+200**) and 60 (**+500**) days.
-- Referrals: referrer **+100**, new linked member **+200**.
+- Referrals: referrer **+100**, new linked member **+200** (both paid as earned Credits; a linked account is required).
 - Combo multipliers: chaining wins **across different games** inside a 6-hour window raises payouts up to **×3**.
 - Daily (3) and weekly (2) challenges, friend challenges, spectator tips, and 14-day seasons with **double-Credit weekends**.
+
+> FINB performs **no real Google or Discord authentication** unless the operator enables those providers on the Supabase project. The Link Center always offers a handle field that applies exactly the same grant and dedupe rules, and the app is fully playable as a guest.
 
 ### Card hierarchy
 
@@ -103,10 +119,23 @@ npm run test:live                 # verifies two humans share a room and both ge
 
 The server is authoritative: clients send intents (`dash`, `tag`, `pass`, `vote`, …) and the server owns every number, so a modified client cannot mint Credits. Without the URL, the same six modes run against practice seats so nothing is ever dead.
 
+## Environment
+
+```bash
+cp .env.example .env.local
+```
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://dwlkiislhsqmcregbmlq.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_NiovXqO7quI0xaUYFXkS9g_GfIQrmBG
+```
+
+Both Supabase values are publishable by design — they ship inside the browser bundle and are constrained by Row Level Security. They are also compiled in as documented defaults (`src/lib/supabase.ts`), so a fresh clone is cloud-configured with no setup; set the variables to point at a different project. `NEXT_PUBLIC_SUPABASE_ANON_KEY` is still accepted as a legacy alias, and `NEXT_PUBLIC_COLYSEUS_URL` switches multiplayer from practice seats to live rooms.
+
 ## Enabling cloud sync (optional)
 
-1. Apply `supabase/schema.sql` (tables + Row Level Security + `leaderboard` view).
-2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+1. Apply `supabase/schema.sql` (tables + Row Level Security + `leaderboard` view + `provider_claims` ledger).
+2. Set `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (defaults already present).
 3. Optionally seed a fictional ladder and verify policies:
 
 ```bash
@@ -137,9 +166,9 @@ tests/              economy · store · net/content rules
 ## Verification status
 
 - `npm run typecheck` — clean.
-- `npm test` — 34 passing (economy values, tier ladder, store flows, multiplayer contract, docs/sitemap/content).
-- `npm run build` — static export, ~110 kB first-load JS for the app route.
-- `npm run smoke` — jsdom boot: hydration, account creation, onboarding, all eight screens, a solo cabinet, a multiplayer room, docs/sitemap and card controls.
+- `npm test` — 48 passing (economy values, tier ladder, store flows, **identity/bucket/grant-dedupe rules**, multiplayer contract, docs/sitemap/content).
+- `npm run build` — static export, ~115 kB first-load JS for the app route.
+- `npm run smoke` — jsdom boot: hydration, account creation, onboarding, the guest reserve, all eight screens, a solo cabinet, a multiplayer room, docs/sitemap, card controls and the **full Link Center flow (guest → Discord → 300 usable Credits)**.
 - `npm run test:live` — two real clients joined one Colyseus room and both received results.
 
 Not verified in this environment: real-device rendering, Lighthouse scores and touch gestures (no browser available here). Layout quality on device is the one thing worth eyeballing before a public launch.

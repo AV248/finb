@@ -3,6 +3,8 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useFinb } from '@/lib/appCtx';
+import { LinkCenter } from '../LinkCenter';
+import { PROVIDERS } from '@/lib/identity';
 import { DOC_SECTIONS } from '@/lib/docs';
 import { STOCKS, TEASERS } from '@/lib/catalog';
 import { formatCompact, formatCredits, timeAgo } from '@/lib/economy';
@@ -87,7 +89,7 @@ function Hub({ onChange }: { onChange: (view: MoreView) => void }) {
     { id: 'legal' as const, glyph: '⚖️', title: 'Privacy · Terms · Accountability', copy: 'What we store, what we never collect, and how we hold ourselves accountable.', badge: 'plain language' },
     { id: 'support' as const, glyph: '🎧', title: 'Support', copy: 'Alias CNAME cs, response targets and the honest status of that channel.', badge: 'CNAME cs' },
     { id: 'market' as const, glyph: '📈', title: 'Market Lab', copy: 'Simulated shares and small businesses that tick while the app is closed.', badge: `${STOCKS.length} tickers` },
-    { id: 'account' as const, glyph: '🧑‍💼', title: 'Account', copy: 'Play Games link award, referral code, profile switching and the guide.', badge: api.user.linked ? 'linked' : 'guest' },
+    { id: 'account' as const, glyph: '🧑‍💼', title: 'Link Center', copy: 'Providers, the reserved welcome balance, referral code, profile switching and the guide.', badge: api.user.linked ? PROVIDERS[api.provider].label.toLowerCase() : `${api.wallet.reserved} reserved` },
     { id: 'data' as const, glyph: '🗄️', title: 'Data Vault', copy: 'Export a JSON backup, wipe a profile, inspect storage and sync state.', badge: 'device-local' },
   ];
 
@@ -421,40 +423,27 @@ function Support() {
 /* ------------------------------------------------------------------ account */
 function Account() {
   const api = useFinb();
-  const [tag, setTag] = useState('');
   const [code, setCode] = useState('');
   const user = api.user;
 
   return (
     <div className="space-y-4">
       <Panel className="p-4">
-        <SectionTitle kicker="ACCOUNT" title={user.username} sub={`Created ${timeAgo(user.createdAt)} · ${user.linked ? 'Play Games linked' : 'guest profile'}`} />
+        <SectionTitle
+          kicker="ACCOUNT"
+          title={user.username}
+          sub={`Created ${timeAgo(user.createdAt)} · ${user.linked ? `${PROVIDERS[api.provider].label} linked` : 'guest profile'}`}
+        />
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <StatPill label="CREDITS" value={formatCompact(user.credits)} tone="flame" />
+          <StatPill label="USABLE CR" value={formatCompact(api.wallet.usable)} tone="flame" />
+          <StatPill label="RESERVED" value={formatCompact(api.wallet.reserved)} sub={api.wallet.reserved ? 'unlock by linking' : 'nothing frozen'} />
           <StatPill label="LIBERALS" value={formatCompact(user.liberals)} tone="lime" />
-          <StatPill label="GAMES" value={`${user.stats.gamesPlayed}`} sub={`${user.stats.gamesWon} won`} />
-          <StatPill label="MULTIPLAYER" value={`${user.stats.multiplayerPlayed}`} sub={`${user.stats.multiplayerWon} won`} />
+          <StatPill label="NOT TRANSFERABLE" value={formatCompact(api.wallet.bonus)} sub="welcome Credits" />
         </div>
-        {!user.linked && (
-          <div className="mt-3 rounded-2xl border border-magenta-500/40 bg-magenta-500/10 p-3">
-            <b className="text-[12px] text-magenta-500">Guest profile — deleted after 90 days unless linked</b>
-            <p className="mt-1 text-[11px] text-white/60">
-              {api.guestDaysLeft ?? 0} days remain. Linking a Play Games tag is a device-local claim in this build (no Google authentication is performed) and pays a
-              one-time +100 Credits. Your username stays permanent either way.
-            </p>
-          </div>
-        )}
+        <div className="mt-3">
+          <LinkCenter compact />
+        </div>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className="label">LINK A PLAY GAMES TAG</span>
-            <div className="mt-1 flex gap-2">
-              <input className="field" value={tag} onChange={event => setTag(event.target.value)} placeholder="your_tag_01" disabled={user.linked} />
-              <button className="btn btn-lime" onClick={() => api.linkPlayGames(tag)} disabled={user.linked || tag.trim().length < 3}>
-                {user.linkBonusClaimed ? 'Claimed' : 'Link +100'}
-              </button>
-            </div>
-            <span className="mt-1 block text-[10px] text-white/40">A tag can only be claimed once on this device. No Google sign-in is performed.</span>
-          </label>
           <label className="block">
             <span className="label">REFERRAL CODE FROM A FRIEND</span>
             <div className="mt-1 flex gap-2">

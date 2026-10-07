@@ -44,6 +44,28 @@ create unique index if not exists profiles_username_key on public.profiles (lowe
 create index if not exists profiles_credits_idx on public.profiles (credits desc);
 create index if not exists profiles_liberals_idx on public.profiles (liberals desc);
 
+-- Provider identity + the three Credit buckets (see src/lib/identity.ts).
+--   locked_credits  guest reserve: visible, unusable, released on link
+--   bonus_credits   the slice of `credits` minted as a one-time welcome grant;
+--                   spendable everywhere but excluded from transfers
+alter table public.profiles
+  add column if not exists provider text not null default 'guest'
+    check (provider in ('guest','google','discord')),
+  add column if not exists provider_subject text,
+  add column if not exists linked_at timestamptz,
+  add column if not exists locked_credits bigint not null default 0 check (locked_credits >= 0),
+  add column if not exists bonus_credits bigint not null default 0 check (bonus_credits >= 0),
+  add column if not exists welcome_grant_claimed boolean not null default false;
+
+-- A welcome grant must never sit above the usable balance that contains it.
+alter table public.profiles drop constraint if exists profiles_bonus_within_balance;
+alter table public.profiles add constraint profiles_bonus_within_balance check (bonus_credits <= credits);
+
+-- Linked profiles can never carry a frozen reserve.
+alter table public.profiles drop constraint if exists profiles_reserve_guest_only;
+alter table public.profiles add constraint profiles_reserve_guest_only
+  check (provider = 'guest' or locked_credits = 0);
+
 -- ---------------------------------------------------------------------------
 -- 2. Activity feed: the shared "floor" wall used by the Friends Zone.
 -- ---------------------------------------------------------------------------
@@ -229,3 +251,38 @@ comment on table public.market_ticks is
 
 comment on table public.profiles is
   'FINB game profiles. Fictional simulation: no real money, no card data, no PII beyond a chosen username.';
+
+-- ---------------------------------------------------------------------------
+-- 12. Provider claims: the durable half of the one-time welcome grant.
+--
+-- The composite primary key — not client logic — is what makes "one welcome
+-- grant per Google/Discord account" true across devices, browsers and even a
+-- cleared local profile. Insert wins; a second insert raises 23505 and the app
+-- links the account without minting a second grant.
+-- ---------------------------------------------------------------------------
+create table if not exists public.provider_claims (
+  provider    text not null check (provider in ('google','discord')),
+  subject_id  text not null check (char_length(subject_id) between 1 and 128),
+  profile_id  uuid,
+  grant       integer not null default 0 check (grant >= 0),
+  claimed_at  timestamptz not null default now(),
+  primary key (provider, subject_id)
+);
+
+create index if not exists provider_claims_profile_idx on public.provider_claims (profile_id);
+
+alter table public.provider_claims enable row level security;
+
+-- Anyone may read the ledger: the app needs to know whether a handle has been
+-- used before it offers a grant, and it contains no personal data.
+drop policy if exists provider_claims_read on public.provider_claims;
+create policy provider_claims_read on public.provider_claims for select using (true);
+
+-- Signed-in (including anonymous-session) devices may claim a slot. The unique
+-- primary key does the deduplication; no other write is permitted.
+drop policy if exists provider_claims_insert on public.provider_claims;
+create policy provider_claims_insert on public.provider_claims for insert to authenticated with check (true);
+
+-- The ledger is append-only: no update or delete policy exists, deliberately.
+comment on table public.provider_claims is
+  'One row per Google/Discord account that banked its FINB welcome grant. Append-only dedupe ledger; primary key enforces uniqueness.';

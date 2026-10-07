@@ -3,7 +3,8 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { createAccount, deleteLocalProfile, getDatabase, resumePlayer, USERNAME_PATTERN, useDatabase } from '@/lib/store';
-import { ECONOMY, formatCredits, timeAgo } from '@/lib/economy';
+import { formatCredits, timeAgo } from '@/lib/economy';
+import { ACCOUNT_RULES, PROVIDERS, PROVIDER_ORDER, subjectProblem, type AuthProvider } from '@/lib/identity';
 import { sfx } from '@/lib/audio';
 import { Mascot, MascotBubble } from './Mascot';
 import { Badge, Panel } from './ui';
@@ -15,10 +16,21 @@ import { Badge, Panel } from './ui';
 export function AccountGate() {
   const db = useDatabase();
   const [username, setUsername] = useState('');
+  const [provider, setProvider] = useState<AuthProvider>('guest');
+  const [handle, setHandle] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const spec = PROVIDERS[provider];
+  const needsHandle = provider !== 'guest';
+  const handleIssue = needsHandle ? subjectProblem(provider, handle) : null;
+  const ready = USERNAME_PATTERN.test(username) && !handleIssue;
+
   const create = () => {
-    const result = createAccount({ username, linked: false });
+    const result = createAccount({
+      username,
+      provider,
+      providerSubject: needsHandle ? handle : undefined,
+    });
     if (!result.ok) {
       setError(result.message);
       sfx.bad();
@@ -59,9 +71,9 @@ export function AccountGate() {
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {[
-              { label: 'LINK BONUS', value: `+${ECONOMY.linkBonus} cr` },
-              { label: 'DAILY LOGIN', value: `+${ECONOMY.dailyBase} cr` },
-              { label: 'REFERRAL', value: `+${ECONOMY.referralReferrer} cr` },
+              { label: 'GUEST RESERVE', value: `${ACCOUNT_RULES.guestReserve} cr` },
+              { label: 'GOOGLE LINK', value: `${ACCOUNT_RULES.googleWelcome} cr` },
+              { label: 'DISCORD LINK', value: `${ACCOUNT_RULES.discordWelcome} cr` },
               { label: 'PLAYERS PER ROOM', value: '2–13' },
             ].map(item => (
               <div key={item.label} className="jelly-flat px-3 py-2">
@@ -79,6 +91,42 @@ export function AccountGate() {
             <p className="mt-1 text-[11px] text-white/55">3–16 characters · letters, numbers and underscores · permanent and unique on this device.</p>
 
             <div className="mt-3 space-y-2">
+              <div>
+                <span className="label">CHOOSE YOUR DOOR</span>
+                <div className="mt-1.5 grid gap-2 sm:grid-cols-3">
+                  {PROVIDER_ORDER.map(door => {
+                    const option = PROVIDERS[door];
+                    const active = provider === door;
+                    return (
+                      <motion.button
+                        key={door}
+                        type="button"
+                        onClick={() => {
+                          setProvider(door);
+                          setError(null);
+                        }}
+                        whileHover={{ y: -3 }}
+                        whileTap={{ scale: 0.98 }}
+                        className={`relative overflow-hidden rounded-2xl border p-2.5 text-left transition ${
+                          active ? 'border-flame-400/70 bg-flame-500/12 neon-edge-flame' : 'border-white/10 bg-white/4 hover:border-white/25'
+                        }`}
+                        aria-pressed={active}
+                      >
+                        <div className={`absolute -right-6 -top-6 h-16 w-16 rounded-full bg-gradient-to-br ${option.tint} to-transparent blur-lg`} />
+                        <div className="relative text-base">{option.glyph}</div>
+                        <b className="relative mt-1 block text-[11px] text-cream-100">{option.label}</b>
+                        <span className="relative mt-0.5 block font-mono text-[10px] text-lime-300">
+                          {door === 'guest' ? `${option.welcome} reserved` : `${option.welcome} usable`}
+                        </span>
+                        <span className="relative mt-0.5 block text-[9px] leading-snug text-white/45">
+                          {door === 'guest' ? 'Unlock by linking later' : option.permanent ? 'Permanent account' : ''}
+                        </span>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <label className="block">
                 <span className="label">USERNAME</span>
                 <input
@@ -97,13 +145,43 @@ export function AccountGate() {
               {username && !USERNAME_PATTERN.test(username) && (
                 <p className="text-[11px] text-flame-300">Usernames need at least 3 characters — letters, numbers or underscores only.</p>
               )}
+
+              {needsHandle && (
+                <label className="block">
+                  <span className="label">{spec.label.toUpperCase()} HANDLE</span>
+                  <input
+                    className="field mt-1"
+                    value={handle}
+                    onChange={event => {
+                      setHandle(event.target.value);
+                      setError(null);
+                    }}
+                    placeholder={provider === 'discord' ? 'your_discord_handle' : 'your_google_handle'}
+                    autoComplete="off"
+                  />
+                  <span className="mt-1 block text-[10px] leading-relaxed text-white/40">
+                    One welcome grant per {spec.label} account, ever. The handle is the key we dedupe on, so a replayed handle adds no Credits.
+                  </span>
+                </label>
+              )}
+              {handleIssue && <p className="text-[11px] text-flame-300">{handleIssue}</p>}
               {error && <p className="text-[11px] text-flame-300">{error}</p>}
-              <button className="btn btn-flame w-full" onClick={create} disabled={!USERNAME_PATTERN.test(username)}>
-                🏦 Create my account
+              <button className="btn btn-flame w-full" onClick={create} disabled={!ready}>
+                {provider === 'guest' ? '🏦 Create my guest account' : `${spec.glyph} Create account with ${spec.label}`}
               </button>
               <p className="text-[10px] leading-relaxed text-white/40">
-                You are creating a <b className="text-white/60">guest account</b> shown as Guest_{username || 'you'} until you link a Google Play Games
-                tag. Guests are deleted after {ECONOMY.guestTtlDays} days if they stay unlinked. Linking pays a one-time +{ECONOMY.linkBonus} Credits.
+                {provider === 'guest' ? (
+                  <>
+                    You are creating a <b className="text-white/60">guest account</b> shown as Guest_{username || 'you'}. Guests hold{' '}
+                    {ACCOUNT_RULES.guestReserve} reserved Credits that cannot be spent on anything, and the profile is deleted after {ACCOUNT_RULES.guestTtlDays} days
+                    unless you link. Linking Google turns the reserve into {ACCOUNT_RULES.googleWelcome} usable Credits; Discord into {ACCOUNT_RULES.discordWelcome}.
+                  </>
+                ) : (
+                  <>
+                    A <b className="text-white/60">{spec.label}</b> account is permanent — no 90-day deletion. It arrives with{' '}
+                    {spec.welcome} usable Credits added once. Welcome Credits can be spent anywhere but never transferred to another account.
+                  </>
+                )}
               </p>
             </div>
           </Panel>
@@ -120,7 +198,8 @@ export function AccountGate() {
                     <div className="min-w-0 flex-1">
                       <b className="block truncate text-xs text-cream-100">{player.username}</b>
                       <span className="text-[10px] text-white/45">
-                        {formatCredits(player.credits)} cr · seen {timeAgo(player.lastSeenAt)}
+                        {PROVIDERS[player.provider ?? 'guest'].glyph} {formatCredits(player.credits)} usable
+                        {(player.lockedCredits ?? 0) > 0 ? ` · ${formatCredits(player.lockedCredits)} reserved` : ''} · seen {timeAgo(player.lastSeenAt)}
                       </span>
                     </div>
                     <button

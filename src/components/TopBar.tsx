@@ -58,7 +58,17 @@ export function TopBar({
         </button>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <motion.span key={`credits-${user.credits}`} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-flame font-mono" title="Credits — the spending currency">
+          <motion.span
+            key={`credits-${user.credits}`}
+            initial={{ scale: 1.12 }}
+            animate={{ scale: 1 }}
+            className="chip chip-flame font-mono"
+            title={
+              api.wallet.bonus > 0
+                ? `${user.credits.toLocaleString()} usable Credits — ${api.wallet.bonus.toLocaleString()} of them are welcome grant Credits and cannot be transferred out`
+                : 'Credits — the spending currency'
+            }
+          >
             ¢ {user.credits.toLocaleString()}
           </motion.span>
           <motion.span key={`liberals-${user.liberals}`} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-lime font-mono" title="Liberals — achievement points, never purchasable">
@@ -68,6 +78,17 @@ export function TopBar({
             <span className="chip hidden sm:inline-flex" title={`${user.combo.streak}-game win streak`}>
               ×{user.combo.multiplier.toFixed(2)}
             </span>
+          )}
+          {api.wallet.reserved > 0 && (
+            <motion.span
+              key={`reserved-${api.wallet.reserved}`}
+              initial={{ scale: 1.1 }}
+              animate={{ scale: 1 }}
+              className="chip hidden font-mono sm:inline-flex"
+              title="Reserved Credits — frozen until you link Google or Discord"
+            >
+              🔒 {api.wallet.reserved}
+            </motion.span>
           )}
           {!user.linked && guestDays !== null && <Badge tone="magenta">GUEST · {guestDays}d</Badge>}
           {db.players.length > 1 && (

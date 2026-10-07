@@ -74,19 +74,26 @@ test('guest profiles are labelled Guest_[username] and carry the 90 day clock', 
   assert.ok(days > 89 * 86400000 && days <= 90 * 86400000, `expected ~90 days, got ${days}`);
 });
 
-test('linking a Play Games tag pays +100 once and only once per tag', () => {
+test('linking a provider converts the reserve and pays the welcome grant once per handle', () => {
   freshAccount('Linker');
   const before = me().credits;
   const first = linkPlayGames('my_tag_01');
   assert.equal(first.ok, true, first.message);
+  // the guest reserve (100) becomes usable — that is the Google welcome grant
   assert.equal(me().credits, before + ECONOMY.linkBonus);
+  assert.equal(me().credits, 100);
+  assert.equal(me().lockedCredits, 0);
+  assert.equal(me().bonusCredits, 100);
   assert.equal(me().linked, true);
   assert.equal(linkPlayGames('other_tag').ok, false, 'a linked profile cannot link twice');
-  // a second profile cannot reuse the tag
+  // a second profile can still become permanent, but never mints the grant again
   createAccount({ username: 'Second', linked: false });
   const reused = linkPlayGames('MY_TAG_01');
-  assert.equal(reused.ok, false);
-  assert.match(reused.message, /claimed|taken/i);
+  assert.equal(reused.ok, true, 'the door stays open, the grant does not');
+  assert.equal(reused.granted ?? 0, 0);
+  assert.equal(reused.grantReused, true);
+  assert.match(reused.message, /already used its one-time welcome grant/i);
+  assert.equal(me().credits, 100, 'only the converted reserve, no second grant');
 });
 
 test('daily login pays 10 and cannot be double-claimed the same day', () => {

@@ -39,10 +39,30 @@ import type {
   RewardBundle,
   SeasonEvent,
 } from './types';
+import {
+  ACCOUNT_RULES,
+  PROVIDERS,
+  claimKey,
+  creditEarned,
+  creditGrant,
+  debitCredits,
+  identityFor,
+  isLinked,
+  normaliseCreditBuckets,
+  normaliseSubject,
+  providerSpec,
+  releaseReserve,
+  reservedCredits,
+  subjectProblem,
+  totalCredits,
+  transferableCredits,
+  usableCredits,
+  type AuthProvider,
+} from './identity';
 import { syncToSupabase } from './supabase';
 
 export const STORAGE_KEY = 'finb-platinum-v2';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /* ------------------------------------------------------------------ *
  * Small helpers
@@ -97,6 +117,7 @@ export function emptyDatabase(): Database {
     version: DB_VERSION,
     players: [],
     currentId: null,
+    claimedProviderSubjects: [],
     market: { quotes: ensureMarket({}), lastTick: Date.now() },
     globalActivity: [],
     claimedPlayGamesTags: [],
@@ -155,7 +176,29 @@ export function hydrate(raw: string | null): Database {
       market: { ...fresh.market, ...parsed.market, quotes: ensureMarket(parsed.market?.quotes ?? {}) },
       season: seasonFor(),
     };
-    merged.players = (merged.players || []).map(player => ({
+    merged.claimedProviderSubjects = merged.claimedProviderSubjects || [];
+    merged.players = (merged.players || []).map(rawPlayer => {
+      // v2 profiles predate provider tracking: derive the new fields from the
+      // old Play Games link so nobody loses a balance or a bonus on upgrade.
+      const legacyLinked = Boolean(rawPlayer.linked);
+      const provider: Player['provider'] = rawPlayer.provider ?? (legacyLinked ? 'google' : 'guest');
+      const migrated: Player = {
+        ...rawPlayer,
+        provider,
+        providerSubject: rawPlayer.providerSubject ?? (legacyLinked ? rawPlayer.playGamesTag ?? null : null),
+        linkedAt: rawPlayer.linkedAt ?? (legacyLinked ? rawPlayer.createdAt ?? Date.now() : null),
+        lockedCredits: rawPlayer.lockedCredits ?? (legacyLinked ? 0 : ACCOUNT_RULES.guestReserve),
+        bonusCredits: rawPlayer.bonusCredits ?? (rawPlayer.linkBonusClaimed ? PROVIDERS.google.welcome : 0),
+        welcomeGrantClaimed: rawPlayer.welcomeGrantClaimed ?? Boolean(rawPlayer.linkBonusClaimed),
+      };
+      if (migrated.providerSubject) {
+        const key = claimKey(migrated.provider, migrated.providerSubject);
+        if (!merged.claimedProviderSubjects.includes(key)) merged.claimedProviderSubjects.push(key);
+      }
+      normaliseCreditBuckets(migrated);
+      return migrated;
+    });
+    merged.players = merged.players.map(player => ({
       ...player,
       card: player.card ? { ...player.card, reissues: player.card.reissues ?? 0 } : makeCard(player.username),
       friends: player.friends || [],
@@ -204,6 +247,9 @@ export function subscribe(listener: () => void): () => void {
 export function update(recipe: (draft: Database) => void, sync = true) {
   const draft: Database = JSON.parse(JSON.stringify(database));
   recipe(draft);
+  // Every write path — games, markets, businesses, tips — funnels through here,
+  // so the credit buckets are re-clamped once, centrally.
+  draft.players.forEach(normaliseCreditBuckets);
   draft.season = seasonFor();
   setDatabase(draft);
   if (sync) void pushToCloud(draft);
@@ -258,7 +304,12 @@ export function useToast() {
  * ------------------------------------------------------------------ */
 export interface CreateAccountInput {
   username: string;
-  linked: boolean;
+  /** Legacy flag kept for callers/tests written before providers existed. */
+  linked?: boolean;
+  /** Which door the profile comes through. Defaults to guest. */
+  provider?: AuthProvider;
+  /** Provider handle/subject — required for one-time grant dedupe. */
+  providerSubject?: string;
   playGamesTag?: string;
   referralCode?: string;
 }
@@ -275,19 +326,35 @@ export function createAccount(input: CreateAccountInput): MutationResult {
   if (problem) return { ok: false, message: problem };
 
   const username = input.username.trim();
-  const displayName = input.linked ? username : `Guest_${username}`;
+  const provider: AuthProvider = input.provider ?? (input.linked ? 'google' : 'guest');
+  const spec = providerSpec(provider);
+  const rawSubject = (input.providerSubject ?? input.playGamesTag ?? '').trim();
+  const subject = rawSubject ? normaliseSubject(rawSubject) : '';
+  const subjectIssue = provider === 'guest' ? null : subjectProblem(provider, rawSubject);
+  if (subjectIssue) return { ok: false, message: subjectIssue };
+  const guest = provider === 'guest';
+  const displayName = guest ? `Guest_${username}` : username;
   const now = Date.now();
-  const tag = input.playGamesTag?.trim() || null;
-  const tagTaken = tag ? db.claimedPlayGamesTags.includes(tag.toLowerCase()) : false;
-  const linked = Boolean(input.linked && tag && !tagTaken);
+  const tag = subject || null;
+  // A provider handle can only ever mint one welcome grant, across every profile.
+  const key = tag ? claimKey(provider, tag) : null;
+  const grantTaken = Boolean(key && db.claimedProviderSubjects.includes(key));
+  const linked = !guest;
+  const welcome = guest ? 0 : grantTaken ? 0 : PROVIDERS[provider].welcome;
   const player: Player = {
     id: uid('player'),
     username: displayName,
     displayName,
     linked,
-    playGamesTag: linked ? tag : null,
+    provider,
+    providerSubject: tag,
+    linkedAt: guest ? null : now,
+    playGamesTag: tag,
+    lockedCredits: guest ? ACCOUNT_RULES.guestReserve : 0,
+    bonusCredits: welcome,
+    welcomeGrantClaimed: !guest && welcome > 0,
     avatarSeed: `${username}-${now}`,
-    credits: 0,
+    credits: welcome,
     liberals: 0,
     createdAt: now,
     lastSeenAt: now,
@@ -311,26 +378,33 @@ export function createAccount(input: CreateAccountInput): MutationResult {
     invitedBy: input.referralCode?.trim() || null,
     referralCode: `FINB-${Math.random().toString(36).slice(2, 8).toUpperCase()}`,
     referralClaimed: false,
-    linkBonusClaimed: false,
+    linkBonusClaimed: !guest && welcome > 0,
     seriesGranted: false,
     platinumInvited: window.localStorage.getItem('finb-platinum-invite') === 'yes',
     guestExpiresAt: linked ? null : now + ECONOMY.guestTtlDays * 86400000,
   };
 
-  let message = linked ? `Welcome aboard, ${displayName}. Play Games link confirmed for this device.` : `Welcome, ${displayName}. Guest rules apply.`;
+  let message: string;
+  if (guest) {
+    message = `Welcome, ${displayName}. ${ACCOUNT_RULES.guestReserve} Credits are reserved on your profile — link Google or Discord to unlock them.`;
+  } else if (welcome > 0) {
+    message = `Welcome aboard, ${displayName}. ${formatCredits(welcome)} usable Credits from your ${spec.label} ${spec.welcome} grant are in your balance.`;
+  } else {
+    message = `Welcome aboard, ${displayName}. That ${spec.label} account already claimed its one-time welcome grant, so your balance starts at zero usable Credits.`;
+  }
+
   update(draft => {
     draft.players.push(player);
     draft.currentId = player.id;
-    if (linked && tag) {
-      draft.claimedPlayGamesTags.push(tag.toLowerCase());
-      player.credits += ECONOMY.linkBonus;
-      player.linkBonusClaimed = true;
-      logActivity(draft, 'reward', `${displayName} linked Play Games and claimed the welcome award.`, ECONOMY.linkBonus);
+    if (key) {
+      draft.claimedPlayGamesTags.push(tag as string);
+      if (!grantTaken) draft.claimedProviderSubjects.push(key);
+      logActivity(draft, 'reward', `${displayName} opened a ${spec.label} account with a ${formatCredits(welcome)} Credit welcome grant.`, welcome);
+    } else {
+      logActivity(draft, 'social', `${displayName} opened a guest profile with ${ACCOUNT_RULES.guestReserve} reserved Credits.`, null);
     }
     draft.onboardingSeen = false;
   });
-  if (linked) message += ` ${formatCredits(ECONOMY.linkBonus)} welcome Credits are in your balance.`;
-  else if (input.linked && tag && tagTaken) message += ' That Play Games tag already claimed the welcome award on this device.';
   return { ok: true, message, player };
 }
 
@@ -405,39 +479,108 @@ export function finishOnboarding() {
   });
 }
 
-export function linkPlayGames(tag: string): MutationResult {
+export interface LinkResult extends MutationResult {
+  /** Credits that became usable in this call (converted reserve + grant). */
+  released?: number;
+  /** Welcome grant minted by this call. */
+  granted?: number;
+  /** True when the provider account had already used its one-time grant. */
+  grantReused?: boolean;
+}
+
+/**
+ * Convert a guest profile into a permanent, provider-linked account.
+ *
+ * Rules enforced here (single source of truth for every UI surface):
+ *  - the reserved 100 Credits always become usable — that balance is the player's;
+ *  - Google mints a 100 Credit welcome grant, Discord mints 300, by topping the
+ *    converted reserve up with +200;
+ *  - a provider handle can claim a welcome grant exactly once, forever, even
+ *    across different profiles and devices;
+ *  - grants are spendable but never transferable (see transferableCredits).
+ */
+export function linkProvider(provider: AuthProvider, subjectInput: string): LinkResult {
   const db = getDatabase();
   const player = db.players.find(item => item.id === db.currentId);
   if (!player) return { ok: false, message: 'No active profile.' };
-  const clean = tag.trim();
-  if (clean.length < 3) return { ok: false, message: 'Enter a Play Games tag with at least 3 characters.' };
-  if (player.linked) return { ok: false, message: `Already linked as ${player.playGamesTag ?? 'a Play Games tag'} on this device.` };
-  if (db.claimedPlayGamesTags.includes(clean.toLowerCase())) {
-    return { ok: false, message: 'That tag already claimed a welcome award on this device. Try another tag.' };
+  if (provider === 'guest') return { ok: false, message: 'Guest is the default door — pick Google or Discord to make the account permanent.' };
+  const spec = providerSpec(provider);
+  if (isLinked(player)) {
+    return { ok: false, message: `This profile is already a permanent ${providerSpec(player.provider).label} account (${player.providerSubject ?? 'linked'}).` };
   }
-  let awarded = 0;
+  const issue = subjectProblem(provider, subjectInput);
+  if (issue) return { ok: false, message: issue };
+  const subject = normaliseSubject(subjectInput);
+  const key = claimKey(provider, subject);
+  const grantReused = db.claimedProviderSubjects.includes(key);
+
+  const reserve = reservedCredits(player);
+  const topUp = grantReused ? 0 : Math.max(0, spec.welcome - reserve);
+  let released = 0;
+  let granted = 0;
+
   update(draft => {
     const target = draft.players.find(item => item.id === draft.currentId);
     if (!target) return;
+    released = releaseReserve(target); // reserve → usable
+    if (topUp > 0) {
+      granted = creditGrant(target, topUp);
+      target.welcomeGrantClaimed = true;
+    }
+    target.provider = provider;
+    target.providerSubject = subject;
+    target.playGamesTag = subject;
     target.linked = true;
-    target.playGamesTag = clean;
+    target.linkedAt = Date.now();
+    target.guestExpiresAt = null;
     target.username = target.username.replace(/^Guest_/, '');
     target.displayName = target.username;
     target.card.holder = target.username;
-    target.guestExpiresAt = null;
-    draft.claimedPlayGamesTags.push(clean.toLowerCase());
-    if (!target.linkBonusClaimed) {
-      target.linkBonusClaimed = true;
-      target.credits += ECONOMY.linkBonus;
-      awarded = ECONOMY.linkBonus;
-      target.activity.unshift({ id: uid('act'), kind: 'reward', title: 'Play Games link award', amount: ECONOMY.linkBonus, at: Date.now() });
-    }
+    if (!draft.claimedPlayGamesTags.includes(subject)) draft.claimedPlayGamesTags.push(subject);
+    if (!grantReused && !draft.claimedProviderSubjects.includes(key)) draft.claimedProviderSubjects.push(key);
+    target.activity.unshift({
+      id: uid('act'),
+      kind: 'reward',
+      title: granted
+        ? `${spec.label} linked · ${formatCredits(granted)} Credit welcome grant`
+        : `${spec.label} linked · reserved Credits unlocked`,
+      amount: released + granted || null,
+      at: Date.now(),
+    });
+    target.activity = target.activity.slice(0, 40);
+    logActivity(draft, 'reward', `${target.username} linked ${spec.label} and unlocked ${formatCredits(released + granted)} Credits.`, released + granted || null);
   });
+
+  const totalUsable = usableCredits((getDatabase().players.find(item => item.id === player.id) ?? player) as Player);
+  const parts: string[] = [];
+  if (released) parts.push(`${formatCredits(released)} reserved Credits are now usable`);
+  if (granted) parts.push(`+${formatCredits(granted)} ${spec.label} welcome Credits added`);
+  const message = grantReused
+    ? `Linked to ${spec.label}. ${parts.length ? parts.join(' and ') + '. ' : ''}That ${spec.label} account already used its one-time welcome grant, so no extra Credits were minted. Guest expiry is cancelled — usable balance ${formatCredits(totalUsable)} Credits.`
+    : `Linked to ${spec.label}. ${parts.length ? parts.join(' and ') + '. ' : ''}Guest expiry is cancelled. Usable balance: ${formatCredits(totalUsable)} Credits (welcome Credits cannot be transferred out).`;
+  return { ok: true, message, released, granted, grantReused };
+}
+
+/** Back-compat wrapper: the pre-provider UI called this with a Play Games tag. */
+export function linkPlayGames(tag: string): LinkResult {
+  return linkProvider('google', tag);
+}
+
+/** How much of the balance may leave this profile right now. */
+export function sendableCredits(player: Player): number {
+  return transferableCredits(player);
+}
+
+/** Reserved + usable, for balance headlines. */
+export function walletSnapshot(player: Player) {
   return {
-    ok: true,
-    message: awarded
-      ? `Linked. ${formatCredits(awarded)} Credits dropped into your balance, and guest expiry is cancelled.`
-      : 'Linked. Guest expiry cancelled. This tag already used its welcome award.',
+    usable: usableCredits(player),
+    reserved: reservedCredits(player),
+    total: totalCredits(player),
+    transferable: transferableCredits(player),
+    bonus: Math.max(0, Math.round(player.bonusCredits ?? 0)),
+    linked: isLinked(player),
+    provider: player.provider,
   };
 }
 
@@ -490,10 +633,10 @@ export function claimReferral(code: string): MutationResult {
   const db = getDatabase();
   const player = db.players.find(item => item.id === db.currentId);
   if (!player) return { ok: false, message: 'No active profile.' };
-  if (!player.linked) return { ok: false, message: 'Link a Play Games tag before claiming a referral.' };
+  if (!isLinked(player)) return { ok: false, message: `Link Google or Discord before claiming a referral — referrers earn +${ECONOMY.referralReferrer} Credits and you get +${ECONOMY.referralJoiner}.` };
   if (player.referralClaimed) return { ok: false, message: 'This profile already claimed a referral reward.' };
   const cleaner = code.trim().toUpperCase();
-  const referrer = db.players.find(item => item.id !== player.id && item.referralCode === cleaner && item.linked);
+  const referrer = db.players.find(item => item.id !== player.id && item.referralCode === cleaner && isLinked(item));
   if (!referrer) return { ok: false, message: 'No linked member on this device owns that code. Try a floor player’s code or invite a friend first.' };
   update(draft => {
     const joiner = draft.players.find(item => item.id === draft.currentId);
@@ -501,9 +644,9 @@ export function claimReferral(code: string): MutationResult {
     if (!joiner || !owner) return;
     joiner.referralClaimed = true;
     joiner.invitedBy = owner.username;
-    joiner.credits += ECONOMY.referralJoiner;
+    creditEarned(joiner, ECONOMY.referralJoiner);
     joiner.liberals += 2;
-    owner.credits += ECONOMY.referralReferrer;
+    creditEarned(owner, ECONOMY.referralReferrer);
     joiner.activity.unshift({ id: uid('act'), kind: 'referral', title: `Referral from ${owner.username}`, amount: ECONOMY.referralJoiner, at: Date.now() });
     logActivity(draft, 'referral', `${joiner.username} joined via ${owner.username}’s invite.`, ECONOMY.referralReferrer);
     grantAchievement(joiner, 'referral');
@@ -661,12 +804,21 @@ export function sendTransfer(recipient: string, amount: number, note: string): M
   const value = Math.round(Number(amount));
   if (!Number.isFinite(value) || value <= 0) return { ok: false, message: 'Enter an amount above zero.' };
   if (value > player.credits) return { ok: false, message: 'Not enough Credits for that transfer.' };
+  const sendable = transferableCredits(player);
+  if (value > sendable) {
+    return {
+      ok: false,
+      message: player.bonusCredits > 0
+        ? `Welcome Credits stay personal — they can be spent but never transferred. You can send up to ${formatCredits(sendable)} Credits.`
+        : 'Not enough Credits for that transfer.',
+    };
+  }
   const friend = player.friends.find(item => item.username.toLowerCase() === recipient.toLowerCase());
   if (!friend) return { ok: false, message: 'Pick a friend from your circle first.' };
   update(draft => {
     const self = draft.players.find(item => item.id === draft.currentId);
     if (!self) return;
-    self.credits -= value;
+    debitCredits(self, value);
     self.activity.unshift({ id: uid('act'), kind: 'transfer', title: `Transfer to ${friend.username}${note ? ` · ${note}` : ''}`, amount: -value, at: Date.now() });
     bumpMission(self, 'transfers-sent', 1);
     const local = draft.players.find(item => item.id === friend.id);
@@ -685,10 +837,13 @@ export function tipPlayer(username: string, amount: number): MutationResult {
   if (!player) return { ok: false, message: 'No active profile.' };
   const value = Math.max(1, Math.round(amount));
   if (value > player.credits) return { ok: false, message: 'Not enough Credits to tip that much.' };
+  if (value > transferableCredits(player)) {
+    return { ok: false, message: 'Tips are transfers, so welcome Credits cannot be tipped. Earn Credits in games to tip with those.' };
+  }
   update(draft => {
     const self = draft.players.find(item => item.id === draft.currentId);
     if (!self) return;
-    self.credits -= value;
+    debitCredits(self, value);
     self.stats.tipsGiven += 1;
     grantAchievement(self, 'tipster');
     self.activity.unshift({ id: uid('act'), kind: 'social', title: `Tipped ${username}`, amount: -value, at: Date.now() });

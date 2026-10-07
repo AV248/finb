@@ -15,7 +15,16 @@ import type {
  * ------------------------------------------------------------------ */
 export const ECONOMY = {
   dailyBase: 10,
+  /** Google welcome grant — also the amount a guest's reserve converts into. */
   linkBonus: 100,
+  /** One-time welcome grants per door. Guests hold the 100 as a locked reserve. */
+  welcome: {
+    guest: 100,
+    google: 100,
+    discord: 300,
+  },
+  /** Extra Credits Discord adds on top of the converted guest reserve. */
+  discordTopUp: 200,
   referralReferrer: 100,
   referralJoiner: 200,
   guestTtlDays: 90,

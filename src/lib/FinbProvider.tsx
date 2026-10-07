@@ -7,6 +7,7 @@ import { GAMES } from './catalog';
 import { CLOUD_ENABLED, fetchCloudStandings } from './supabase';
 import { COLYSEUS_URL } from './net';
 import { buildStandings, gameById, guestDaysLeft } from './economy';
+import { reservedCredits, totalCredits, transferableCredits, usableCredits, type AuthProvider } from './identity';
 import {
   addFriend as storeAddFriend,
   applySeriesToCurrent,
@@ -21,6 +22,7 @@ import {
   getDatabase,
   grantReward,
   linkPlayGames as storeLinkPlayGames,
+  linkProvider as storeLinkProvider,
   removeFriend as storeRemoveFriend,
   reissueCard as storeReissueCard,
   resolveChallenge as storeResolveChallenge,
@@ -264,7 +266,12 @@ export function FinbProvider({ children }: { children?: ReactNode }) {
         const result = tradeStock(symbol, quantity, side);
         toastFn(result.message, result.ok ? 'good' : 'bad', result.ok ? '📈' : '⚠️');
       },
-      linkPlayGames: tag => {
+      linkProvider: (provider: AuthProvider, subject: string) => {
+    const result = storeLinkProvider(provider, subject);
+    toastFn(result.message, result.ok ? 'good' : 'bad', result.ok ? '🔗' : '⚠️');
+    if (result.ok) celebrate();
+  },
+  linkPlayGames: tag => {
         const result = storeLinkPlayGames(tag);
         toastFn(result.message, result.ok ? 'good' : 'bad', result.ok ? '🔗' : '⚠️');
         if (result.ok) celebrate();
@@ -331,6 +338,14 @@ export function FinbProvider({ children }: { children?: ReactNode }) {
       cloudEnabled: CLOUD_ENABLED,
       liveServerEnabled: Boolean(COLYSEUS_URL),
       guestDaysLeft: guestDaysLeft(user),
+      wallet: {
+        usable: usableCredits(user),
+        reserved: reservedCredits(user),
+        total: totalCredits(user),
+        transferable: transferableCredits(user),
+        bonus: Math.max(0, Math.round(user.bonusCredits ?? 0)),
+      },
+      provider: user.provider,
     };
   }, [celebrate, db, finishGame, navigate, screen, standings, toastFn, user]);
 

@@ -34,6 +34,9 @@ export interface FinbApi {
   buyBusiness: (id: string, name: string, cost: number, yieldPerMinute: number) => void;
   runBusiness: (id: string) => void;
   trade: (symbol: string, quantity: number, side: 'buy' | 'sell') => void;
+  /** Link a social provider; mints the one-time welcome grant when eligible. */
+  linkProvider: (provider: 'google' | 'discord', subject: string) => void;
+  /** Legacy alias kept for pre-provider call sites. */
   linkPlayGames: (tag: string) => void;
   claimReferral: (code: string) => void;
   redeemSeries: (code: string) => void;
@@ -57,6 +60,10 @@ export interface FinbApi {
   cloudEnabled: boolean;
   liveServerEnabled: boolean;
   guestDaysLeft: number | null;
+  /** Credit buckets for the active profile. */
+  wallet: { usable: number; reserved: number; total: number; transferable: number; bonus: number };
+  /** Which door the active profile came through. */
+  provider: 'guest' | 'google' | 'discord';
 }
 
 const Ctx = createContext<FinbApi | null>(null);

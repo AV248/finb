@@ -10,9 +10,24 @@
  */
 import type { Database, Player, Quote, SeasonEvent } from './types';
 
-export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || '';
-export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
+/**
+ * Project credentials. Both values are publishable by design (they ship inside
+ * the client bundle and are protected by Row Level Security), so the project
+ * URL + publishable key are used as documented defaults and can be overridden
+ * per environment with NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.
+ * NEXT_PUBLIC_SUPABASE_ANON_KEY is accepted as a legacy alias.
+ */
+export const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || 'https://dwlkiislhsqmcregbmlq.supabase.co';
+export const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
+  'sb_publishable_NiovXqO7quI0xaUYFXkS9g_GfIQrmBG';
 export const CLOUD_ENABLED = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
+export const CLOUD_PROJECT_REF = SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
+
+/** Social providers FINB can hand the login off to. */
+export type SocialProvider = 'google' | 'discord';
 
 type SupabaseClient = import('@supabase/supabase-js').SupabaseClient;
 let client: SupabaseClient | null = null;
@@ -76,6 +91,12 @@ export async function syncToSupabase(payload: SyncPayload | null): Promise<boole
         streak: player.streak,
         level: Math.floor(player.liberals / 25) + 1,
         linked_play_games: player.linked,
+        provider: player.provider,
+        provider_subject: player.providerSubject,
+        linked_at: player.linkedAt ? new Date(player.linkedAt).toISOString() : null,
+        locked_credits: Math.round(player.lockedCredits ?? 0),
+        bonus_credits: Math.round(player.bonusCredits ?? 0),
+        welcome_grant_claimed: Boolean(player.welcomeGrantClaimed),
         season_id: season?.id ?? null,
         stats: player.stats,
         combo: player.combo,
@@ -135,4 +156,78 @@ export async function broadcastFriendEvent(channelName: string, event: { kind: s
   }
 }
 
-export const CLOUD_MODE_LABEL = CLOUD_ENABLED ? 'Cloud linked' : 'Offline device build';
+/* ------------------------------------------------------------------ *
+ * Social providers (Google / Discord)
+ * ------------------------------------------------------------------ */
+
+/**
+ * Ask Supabase to bounce the player through a real OAuth handshake. Returns
+ * the URL to visit when the operator has the provider enabled; returns an
+ * explanatory message instead of throwing when it is not, so the UI can fall
+ * back to the handle-based link path.
+ */
+export async function startProviderOAuth(
+  provider: SocialProvider,
+  redirectTo?: string,
+): Promise<{ ok: boolean; url?: string; message: string }> {
+  if (!CLOUD_ENABLED) return { ok: false, message: 'Cloud auth is not configured in this build.' };
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return { ok: false, message: 'Cloud auth is not configured in this build.' };
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: redirectTo ?? (typeof window !== 'undefined' ? window.location.href : undefined), skipBrowserRedirect: true },
+    });
+    if (error) throw error;
+    if (!data?.url) return { ok: false, message: `${provider} sign-in is not enabled on this project yet.` };
+    return { ok: true, url: data.url, message: `Handing off to ${provider}…` };
+  } catch (error) {
+    return { ok: false, message: `Could not reach ${provider} sign-in (${(error as Error).message}). Use the handle field below.` };
+  }
+}
+
+/** Provider subject from the current Supabase session, when one exists. */
+export async function sessionProviderSubject(): Promise<{ provider: SocialProvider; subject: string } | null> {
+  if (!CLOUD_ENABLED) return null;
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return null;
+    const { data } = await supabase.auth.getSession();
+    const identity = data.session?.user?.identities?.find(item => item.provider === 'google' || item.provider === 'discord');
+    if (!identity) return null;
+    const subject = (identity.identity_data?.sub ?? identity.identity_data?.id ?? identity.identity_data?.user_name) as string | undefined;
+    if (!subject) return null;
+    return { provider: identity.provider as SocialProvider, subject };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reserve a provider handle for the one-time welcome grant.
+ *
+ * `provider_claims` is keyed on (provider, subject_id) so the unique index — not
+ * client logic — is what makes a second claim impossible, even across devices.
+ * Returns 'claimed' when this handle already used its grant.
+ */
+export async function claimProviderSlot(
+  provider: SocialProvider,
+  subject: string,
+): Promise<'reserved' | 'claimed' | 'unavailable'> {
+  if (!CLOUD_ENABLED) return 'unavailable';
+  try {
+    const supabase = await getSupabase();
+    if (!supabase) return 'unavailable';
+    const identity = await cloudIdentity(supabase);
+    if (!identity) return 'unavailable';
+    const { error } = await supabase.from('provider_claims').insert({ provider, subject_id: subject, profile_id: identity });
+    if (!error) return 'reserved';
+    // 23505 = unique_violation → this provider account already banked its grant
+    if (error.code === '23505' || /duplicate key/i.test(error.message)) return 'claimed';
+    return 'unavailable';
+  } catch {
+    return 'unavailable';
+  }
+}
+
+export const CLOUD_MODE_LABEL = CLOUD_ENABLED ? `Cloud linked · ${CLOUD_PROJECT_REF}` : 'Offline device build';
