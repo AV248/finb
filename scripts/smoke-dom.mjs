@@ -16,8 +16,8 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 const OUT = join(process.cwd(), 'out');
 const PORT = Number(process.env.SMOKE_PORT || 5399);
 
-if (!existsSync(OUT)) {
-  console.error('out/ not found — run `npm run build` first.');
+if (!process.env.SMOKE_URL && !existsSync(OUT)) {
+  console.error('out/ not found — run `npm run build` first, or set SMOKE_URL to test a running server.');
   process.exit(1);
 }
 
@@ -35,6 +35,10 @@ const TYPES = {
   '.xml': 'application/xml; charset=utf-8',
 };
 
+const externalUrl = process.env.SMOKE_URL?.trim() || '';
+const origin = externalUrl || `http://127.0.0.1:${PORT}`;
+const targetPath = externalUrl ? '/' : '/index.html';
+
 const server = createServer(async (request, response) => {
   const url = new URL(request.url, `http://127.0.0.1:${PORT}`);
   let path = normalize(join(OUT, decodeURIComponent(url.pathname)));
@@ -51,7 +55,7 @@ const server = createServer(async (request, response) => {
   }
 });
 
-await new Promise(resolve => server.listen(PORT, '127.0.0.1', resolve));
+if (!externalUrl) await new Promise(resolve => server.listen(PORT, '127.0.0.1', resolve));
 
 const errors = [];
 const virtualConsole = new VirtualConsole();
@@ -109,8 +113,12 @@ function installShims(window) {
   });
 }
 
-const dom = new JSDOM(await readFile(join(OUT, 'index.html'), 'utf8'), {
-  url: `http://127.0.0.1:${PORT}/`,
+const html = externalUrl
+  ? await fetch(`${origin}${targetPath}`).then(response => response.text())
+  : await readFile(join(OUT, 'index.html'), 'utf8');
+
+const dom = new JSDOM(html, {
+  url: `${origin}${targetPath}`,
   runScripts: 'dangerously',
   pretendToBeVisual: true,
   resources: 'usable',

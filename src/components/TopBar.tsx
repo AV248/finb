@@ -58,10 +58,10 @@ export function TopBar({
         </button>
 
         <div className="ml-auto flex items-center gap-1.5">
-          <motion.span key={user.credits} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-flame font-mono" title="Credits — the spending currency">
+          <motion.span key={`credits-${user.credits}`} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-flame font-mono" title="Credits — the spending currency">
             ¢ {user.credits.toLocaleString()}
           </motion.span>
-          <motion.span key={user.liberals} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-lime font-mono" title="Liberals — achievement points, never purchasable">
+          <motion.span key={`liberals-${user.liberals}`} initial={{ scale: 1.12 }} animate={{ scale: 1 }} className="chip chip-lime font-mono" title="Liberals — achievement points, never purchasable">
             🌿 {user.liberals.toLocaleString()}
           </motion.span>
           {user.combo.multiplier > 1 && (
