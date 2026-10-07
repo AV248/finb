@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { STOCKS, formatCredits } from '../lib.js';
+import { GAMES, STOCKS, formatCredits } from '../lib.js';
 
 const trivia = [
   { question: 'A share of a company is…', choices: ['A small ownership stake', 'A guaranteed interest payment', 'A short-term loan to a bank', 'A coupon for its products'], answer: 0, note: 'A share represents fractional ownership; its value can rise or fall.' },
@@ -9,6 +9,39 @@ const trivia = [
   { question: 'If an asset’s price falls by 20%, a 20% rise from the new price…', choices: ['Returns it exactly to the original price', 'Leaves it below the original price', 'Pushes it above the original price', 'Has no effect'], answer: 1, note: 'Percentages use different starting bases: 100 → 80 → 96.' },
   { question: 'Liquidity usually refers to…', choices: ['How quickly an asset may be converted to cash', 'The height of its past return', 'Its tax rate', 'How many people own it'], answer: 0, note: 'Liquidity describes how readily something can be traded without a large price impact.' },
 ];
+
+const quickChallengeBank = {
+  'unit-price': { question: 'Which little basket has the lower price per piece?', choices: ['5 for 2 Credits', '8 for 4 Credits', 'They cost the same per piece', 'There is not enough information'], answer: 0, note: 'The first basket is 0.4 Credits per piece; the second is 0.5.' },
+  'percent-pop': { question: 'A share falls from 100 to 80 Credits. What rise from 80 returns it to 100?', choices: ['20%', '25%', '10%', '80%'], answer: 1, note: 'The 20-Credit recovery is 25% of the new 80-Credit base.' },
+  'asset-spot': { question: 'Which is most clearly a productive business asset?', choices: ['A working oven used by a bakery', 'An unpaid electricity bill', 'A week of advertising spend', 'A customer complaint'], answer: 0, note: 'An oven is a resource the business uses to operate; this is a simplified game example.' },
+  'budget-beat': { question: 'What is a budget doing at its most basic?', choices: ['Planning expected income and outflows', 'Guaranteeing a future return', 'Predicting every market price', 'Removing all financial uncertainty'], answer: 0, note: 'A budget is a plan, not a promise or a forecast that must come true.' },
+  'liquid-lasso': { question: 'Which asset is usually easiest to spend or transfer quickly?', choices: ['Cash balance', 'A family house', 'A custom-built sculpture', 'A five-year lockup'], answer: 0, note: 'Cash is usually more liquid than property or an asset with a lockup.' },
+  'risk-radar': { question: 'Diversification is mainly an attempt to…', choices: ['Spread exposure across different assets', 'Guarantee a profit', 'Remove every kind of risk', 'Make every asset move together'], answer: 0, note: 'Diversification can spread risk; it cannot eliminate risk or promise returns.' },
+  'inflation-ink': { question: 'If prices rise while your Credits stay the same, those Credits usually…', choices: ['Buy fewer goods', 'Buy more goods', 'Become a company share', 'Gain guaranteed interest'], answer: 0, note: 'Inflation can reduce purchasing power when prices rise faster than your balance.' },
+  'revenue-rush': { question: 'A tiny shop sells 90 cr and spends 65 cr. Before other items, what is the result?', choices: ['25 cr operating surplus', '155 cr profit', '65 cr revenue', '90 cr loss'], answer: 0, note: 'Revenue minus those costs is 25 Credits in this simplified example.' },
+  'fee-finder': { question: 'What belongs in the total cost of a subscription?', choices: ['Recurring fees as well as the headline price', 'Only the first day’s price', 'Only its bright marketing banner', 'A competitor’s stock price'], answer: 0, note: 'Recurring charges and applicable fees matter when comparing total cost.' },
+  'red-flag': { question: 'A stranger asks you to forward a one-time sign-in code. Best move?', choices: ['Keep it private and stop the request', 'Send it if they sound friendly', 'Post it in your public profile', 'Reuse it as a card CVV'], answer: 0, note: 'Never share one-time authentication codes or passwords.' },
+  'compound-pop': { question: 'What makes compound growth different from simple growth?', choices: ['Past returns can earn returns too', 'It can never go down', 'It has no uncertainty', 'It guarantees a fixed payout'], answer: 0, note: 'Compounding means returns may themselves begin to earn returns.' },
+  'portfolio-pick': { question: 'Which portfolio is more diversified in this tiny example?', choices: ['Several different asset types', 'Only one company share', 'One collectible in three boxes', 'Only one market sector'], answer: 0, note: 'Different exposures can spread concentration risk, but do not remove it.' },
+  'debt-detector': { question: 'The amount originally borrowed is the…', choices: ['Principal', 'Dividend', 'Spread', 'Liquidity'], answer: 0, note: 'Principal is the original amount borrowed, before interest and fees.' },
+  'market-mirror': { question: 'A share rose last month. What does that tell you about next month?', choices: ['Nothing guaranteed; future prices can differ', 'It must rise again', 'It cannot fall now', 'The company owes a dividend'], answer: 0, note: 'Past performance is not a guarantee or reliable promise of future results.' },
+  'dividend-dash': { question: 'A company dividend is best described as…', choices: ['A distribution that can change or stop', 'Guaranteed interest on every share', 'A share-price floor', 'A bank-card security code'], answer: 0, note: 'Companies may change, reduce, or stop distributions; they are not guaranteed.' },
+};
+const multiplayerIds = new Set(['duel', 'rally', 'quizduel', 'sprintduel']);
+const quickChallengeIds = new Set(Object.keys(quickChallengeBank).concat(['ticker-tap']));
+
+function createQuickPrompt(gameId, db) {
+  let prompt = quickChallengeBank[gameId];
+  if (gameId === 'ticker-tap') {
+    const stocks = [...STOCKS].sort(() => Math.random() - 0.5).slice(0, 4);
+    const quotes = db?.market?.quotes || {};
+    const richest = stocks.reduce((best, stock) => (quotes[stock.symbol]?.price || stock.base) > (quotes[best.symbol]?.price || best.base) ? stock : best, stocks[0]);
+    prompt = { question: 'Which ticker has the highest simulated share price right now?', choices: stocks.map(stock => `${stock.symbol} · ${formatCredits(quotes[stock.symbol]?.price || stock.base, 2)} cr`), answer: stocks.findIndex(stock => stock.symbol === richest.symbol), note: 'The ticker prices move on a random-walk simulation; a higher price is not a better investment.' };
+  }
+  if (!prompt) return null;
+  const shuffled = prompt.choices.map((choice, index) => ({ choice, correct: index === prompt.answer })).sort(() => Math.random() - 0.5);
+  return { ...prompt, choices: shuffled.map(item => item.choice), answer: shuffled.findIndex(item => item.correct) };
+}
 
 const memorySymbols = ['◒', '✳', '◇', '▰'];
 const displayNames = {
@@ -20,6 +53,25 @@ const displayNames = {
   vault21: 'Vault 21',
   forecast: 'Forecast Frenzy',
   duel: 'FAF Market Duel',
+  'unit-price': 'Penny Arcade',
+  'percent-pop': 'Rebound Room',
+  'asset-spot': 'Asset Safari',
+  'budget-beat': 'Budget Beat',
+  'liquid-lasso': 'Liquid Lasso',
+  'risk-radar': 'Risk Radar',
+  'inflation-ink': 'Inflation Ink',
+  'revenue-rush': 'Revenue Rush',
+  'fee-finder': 'Fee Finder',
+  'red-flag': 'Red Flag Relay',
+  'compound-pop': 'Compound Pop',
+  'ticker-tap': 'Ticker Tap',
+  'portfolio-pick': 'Portfolio Pick',
+  'debt-detector': 'Debt Detective',
+  'market-mirror': 'Market Mirror',
+  'dividend-dash': 'Dividend Dash',
+  rally: 'FAF Market Rally',
+  quizduel: 'FAF Ledger Ladder',
+  sprintduel: 'FAF Sprint Circuit',
 };
 
 function newCode() {
@@ -48,6 +100,12 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
   const [stake, setStake] = useState(10);
   const [marketSymbol, setMarketSymbol] = useState('NVA');
   const [direction, setDirection] = useState('up');
+  const [quickPrompt, setQuickPrompt] = useState(() => createQuickPrompt(gameId, db));
+  const [rallyRound, setRallyRound] = useState(1);
+  const [rallyPlayerScore, setRallyPlayerScore] = useState(0);
+  const [rallyRivalScore, setRallyRivalScore] = useState(0);
+  const [rivalQuizScore, setRivalQuizScore] = useState(0);
+  const [opponentSprintCount] = useState(() => 19 + Math.floor(Math.random() * 18));
   const startedAt = useRef(0);
   const reactionTimer = useRef(null);
   const reactionMissTimer = useRef(null);
@@ -146,9 +204,26 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
     const correct = choice === question.answer;
     const nextScore = quizScore + (correct ? 1 : 0);
     setQuizScore(nextScore);
+    const rivalCorrect = gameId === 'quizduel' && Math.random() < 0.67;
+    const nextRivalScore = rivalQuizScore + (rivalCorrect ? 1 : 0);
+    if (gameId === 'quizduel') setRivalQuizScore(nextRivalScore);
     if (quizIndex < quizSet.length - 1) {
-      setMessage(correct ? `Exactly. ${question.note}` : `Not quite. ${question.note}`);
+      setMessage(gameId === 'quizduel'
+        ? `You ${nextScore} · ${opponent?.username || 'Rival'} ${nextRivalScore}. ${question.note}`
+        : (correct ? `Exactly. ${question.note}` : `Not quite. ${question.note}`));
       setQuizIndex(index => index + 1);
+      return;
+    }
+    if (gameId === 'quizduel') {
+      const won = nextScore > nextRivalScore;
+      const tied = nextScore === nextRivalScore;
+      complete({
+        credits: (won ? 38 : tied ? 20 : 8) + nextScore * 4,
+        liberals: won ? 6 : tied ? 2 : nextScore,
+        won,
+        title: `FAF Ledger Ladder · ${nextScore} to ${nextRivalScore}`,
+        message: `${nextScore} correct versus ${nextRivalScore} for ${opponent?.username || 'your rival'}. ${won ? 'Top rung is yours.' : tied ? 'A perfect tie. Very civilised.' : 'Good match. The ladder is yours to climb again.'}`,
+      });
       return;
     }
     const perfect = nextScore === quizSet.length;
@@ -158,6 +233,18 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
       won: nextScore > 0,
       title: `Ledger Logic · ${nextScore} of ${quizSet.length}`,
       message: perfect ? 'A perfect little ledger. Keep the real-world caveats in mind.' : `${nextScore} right. ${question.note}`,
+    });
+  };
+
+  const answerQuick = (choice) => {
+    if (phase === 'result' || !quickPrompt) return;
+    const correct = choice === quickPrompt.answer;
+    complete({
+      credits: correct ? 18 : 4,
+      liberals: correct ? 3 : 0,
+      won: correct,
+      title: `${title || 'Quick challenge'} · ${correct ? 'nailed it' : 'new angle'}`,
+      message: `${correct ? 'Brightly done.' : 'Good puzzle; keep the note.'} ${quickPrompt.note}`,
     });
   };
 
@@ -201,6 +288,12 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
   const finishSprint = () => {
     if (phase !== 'sprint') return;
     const count = sprintCountRef.current;
+    if (gameId === 'sprintduel') {
+      const won = count > opponentSprintCount;
+      const tied = count === opponentSprintCount;
+      complete({ credits: won ? 45 : tied ? 24 : 8, liberals: won ? 6 : tied ? 3 : 1, won, title: `FAF Sprint Circuit · ${count}–${opponentSprintCount}`, message: `${count} taps to ${opponentSprintCount} for ${opponent?.username || 'your rival'}. ${won ? 'The circuit is yours.' : tied ? 'A dead-even sprint.' : 'Strong thumbs from both sides; run it back.'}` });
+      return;
+    }
     const credits = Math.min(40, count * 2);
     const liberals = count >= 18 ? 2 : count >= 10 ? 1 : 0;
     complete({ credits, liberals, won: count >= 10, title: `Signal Sprint · ${count} taps`, message: `${count} clean taps. ${credits} Credits have cleared the sprint.` });
@@ -232,10 +325,27 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
         const opponentPick = Math.random() < 0.5 ? 'up' : 'down';
         const playerCorrect = pick === actual;
         const opponentCorrect = opponentPick === actual;
-        const credits = playerCorrect ? (opponentCorrect ? 15 : 40) : (opponentCorrect ? 0 : 5);
-        const liberals = playerCorrect ? (opponentCorrect ? 2 : 5) : 0;
-        const outcome = playerCorrect ? (opponentCorrect ? 'A dead heat' : 'You take the round') : (opponentCorrect ? `${opponent?.username || 'Your rival'} called it` : 'Both calls missed');
-        complete({ credits, liberals, won: playerCorrect, title: `FAF duel · ${outcome}`, message: `${symbol} closed ${actual.toUpperCase()} at ${formatCredits(move.next, 2)}. ${outcome}. No entry fee, no hard feelings.` });
+        if (gameId === 'rally') {
+          const nextPlayer = rallyPlayerScore + (playerCorrect ? 1 : 0);
+          const nextRival = rallyRivalScore + (opponentCorrect ? 1 : 0);
+          if (rallyRound < 3) {
+            setRallyPlayerScore(nextPlayer);
+            setRallyRivalScore(nextRival);
+            setRallyRound(round => round + 1);
+            setPhase('round-ready');
+            setMessage(`${symbol} went ${actual.toUpperCase()}. Score ${nextPlayer}–${nextRival}; call round ${rallyRound + 1}.`);
+            return;
+          }
+          const won = nextPlayer > nextRival;
+          const tied = nextPlayer === nextRival;
+          const outcome = won ? 'rally won' : tied ? 'rally tied' : 'rival takes the rally';
+          complete({ credits: nextPlayer * 12 + (won ? 24 : tied ? 12 : 0), liberals: nextPlayer * 2 + (won ? 4 : tied ? 2 : 0), won, title: `FAF Market Rally · ${nextPlayer}–${nextRival}`, message: `Final score ${nextPlayer}–${nextRival}. You ${outcome}. The three market ticks were simulated; there was no entry fee.` });
+        } else {
+          const credits = playerCorrect ? (opponentCorrect ? 15 : 40) : (opponentCorrect ? 0 : 5);
+          const liberals = playerCorrect ? (opponentCorrect ? 2 : 5) : 0;
+          const outcome = playerCorrect ? (opponentCorrect ? 'A dead heat' : 'You take the round') : (opponentCorrect ? `${opponent?.username || 'Your rival'} called it` : 'Both calls missed');
+          complete({ credits, liberals, won: playerCorrect, title: `FAF duel · ${outcome}`, message: `${symbol} closed ${actual.toUpperCase()} at ${formatCredits(move.next, 2)}. ${outcome}. No entry fee, no hard feelings.` });
+        }
       } else {
         const won = pick === actual;
         complete({ credits: won ? 30 : 0, liberals: won ? 3 : 0, won, title: `Forecast Frenzy · ${symbol} ${actual}`, message: `${symbol} went ${actual.toUpperCase()} to ${formatCredits(move.next, 2)}. ${won ? 'Nice read.' : 'The market zigged.'} No credits were staked.` });
@@ -258,6 +368,15 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
     setQuizSet([...trivia].sort(() => Math.random() - 0.5).slice(0, 3));
     setQuizIndex(0);
     setQuizScore(0);
+    setRivalQuizScore(0);
+    setResult(null);
+    setPhase('idle');
+    setMessage('');
+  };
+
+  const restartQuick = () => {
+    roundNumber.current += 1;
+    setQuickPrompt(createQuickPrompt(gameId, db));
     setResult(null);
     setPhase('idle');
     setMessage('');
@@ -274,10 +393,17 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
 
   const restartStandard = () => {
     if (gameId === 'cipher') return restartCipher();
-    if (gameId === 'quiz') return restartQuiz();
+    if (gameId === 'quiz' || gameId === 'quizduel') return restartQuiz();
     if (gameId === 'memory') return restartMemory();
-    if (gameId === 'sprint') return startSprint();
+    if (gameId === 'sprint' || gameId === 'sprintduel') return startSprint();
     if (gameId === 'reaction') return startReaction();
+    if (quickChallengeIds.has(gameId)) return restartQuick();
+    if (gameId === 'rally') {
+      roundNumber.current += 1;
+      setRallyRound(1);
+      setRallyPlayerScore(0);
+      setRallyRivalScore(0);
+    }
     roundNumber.current += 1;
     setResult(null);
     setMessage('');
@@ -290,21 +416,23 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
   };
   const activeQuestion = quizSet[quizIndex];
   const marketQuote = db.market.quotes[marketSymbol];
+  const gameDefinition = GAMES.find(game => game.id === gameId);
+  const isMultiplayer = multiplayerIds.has(gameId);
 
   return (
     <div className="modal-scrim" onMouseDown={closeOnBackdrop}>
       <section className={`game-modal game-modal-${gameId}`} role="dialog" aria-modal="true" aria-labelledby="game-modal-title">
         <div className="modal-cap">
-          <div className="modal-kicker"><span className="live-pip" /> FINB PLAY FLOOR <span className="cap-slash">/</span> {gameId === 'duel' ? 'FAF RANDOM MATCH' : 'ROUND IN PROGRESS'}</div>
+          <div className="modal-kicker"><span className="live-pip" /> FINB PLAY FLOOR <span className="cap-slash">/</span> {isMultiplayer ? 'FAF MULTIPLAYER MATCH' : 'ROUND IN PROGRESS'}</div>
           <button className="icon-button modal-close" type="button" onClick={onClose} aria-label="Close game">×</button>
         </div>
         <div className="game-modal-head">
-          <div className={`game-emblem emblem-${gameId}`}>{gameId === 'duel' ? '↔' : gameId === 'vault21' ? '21' : gameId === 'cipher' ? '⌘' : gameId === 'quiz' ? '∑' : gameId === 'memory' ? '▦' : gameId === 'sprint' ? '⌁' : '↗'}</div>
+          <div className={`game-emblem emblem-${gameId}`}>{gameId === 'vault21' ? '21' : gameId === 'cipher' ? '⌘' : gameId === 'quiz' || gameId === 'quizduel' ? '∑' : gameId === 'memory' ? '▦' : gameId === 'sprint' || gameId === 'sprintduel' ? '⌁' : gameDefinition?.icon || '↗'}</div>
           <div>
             <h2 id="game-modal-title">{title}</h2>
-            <p>{gameId === 'duel' ? `Matched with ${opponent?.username || 'a random-floor player'}` : gameId === 'vault21' ? 'Virtual Credits only · no outside value' : 'One round. All play. No real-world value.'}</p>
+            <p>{isMultiplayer ? `Matched with ${opponent?.username || 'a random-floor player'}` : gameId === 'vault21' ? 'Virtual Credits only · no outside value' : quickChallengeIds.has(gameId) ? 'One bright little skill challenge. No stake; fictional Credits only.' : 'One round. All play. No real-world value.'}</p>
           </div>
-          {gameId === 'duel' && <div className="opponent-chip"><span className="avatar avatar-small">{String(opponent?.username || 'F').slice(0, 1)}</span><span><small>YOUR RIVAL</small><b>{opponent?.username || 'Random player'}</b></span></div>}
+          {isMultiplayer && <div className="opponent-chip"><span className="avatar avatar-small">{String(opponent?.username || 'F').slice(0, 1)}</span><span><small>YOUR RIVAL</small><b>{opponent?.username || 'Random player'}</b></span></div>}
         </div>
 
         {gameId === 'reaction' && (
@@ -326,15 +454,26 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
           </div>
         )}
 
-        {gameId === 'quiz' && (
+        {(gameId === 'quiz' || gameId === 'quizduel') && (
           <div className="quiz-board">
             {phase === 'result' ? <ResultPanel result={result} onAgain={restartStandard} /> : <>
-              <div className="quiz-progress"><span>QUESTION {quizIndex + 1} / {quizSet.length}</span><div>{quizSet.map((_, index) => <i className={index < quizIndex ? 'done' : index === quizIndex ? 'current' : ''} key={index} />)}</div><b>{quizScore} right</b></div>
+              <div className="quiz-progress"><span>QUESTION {quizIndex + 1} / {quizSet.length}</span><div>{quizSet.map((_, index) => <i className={index < quizIndex ? 'done' : index === quizIndex ? 'current' : ''} key={index} />)}</div><b>{gameId === 'quizduel' ? `${quizScore} — ${rivalQuizScore}` : `${quizScore} right`}</b></div>
               <h3>{activeQuestion?.question}</h3>
               <div className="answer-list">{activeQuestion?.choices.map((choice, index) => <button key={choice} className="answer-option" onClick={() => answerQuiz(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}<b>↗</b></button>)}</div>
               {message && <div className="inline-feedback">{message}</div>}
             </>}
             <div className="micro-rule"><span>LEARN A LITTLE</span><span>SIMULATION, NOT FINANCIAL ADVICE</span></div>
+          </div>
+        )}
+
+        {quickChallengeIds.has(gameId) && quickPrompt && (
+          <div className="quick-challenge-board">
+            {phase === 'result' ? <ResultPanel result={result} onAgain={restartStandard} /> : <>
+              <div className="quick-challenge-top"><span className="eyebrow">CHALLENGE / 01</span><span>+18 CR · +3 LP</span></div>
+              <h3>{quickPrompt.question}</h3>
+              <div className="answer-list quick-answer-list">{quickPrompt.choices.map((choice, index) => <button key={`${index}-${choice}`} className="answer-option" onClick={() => answerQuick(index)}><span>{String.fromCharCode(65 + index)}</span>{choice}<b>↗</b></button>)}</div>
+            </>}
+            <div className="micro-rule"><span>NO ENTRY FEE</span><span>LEARN · PLAY · REPEAT</span></div>
           </div>
         )}
 
@@ -347,11 +486,11 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
           </div>
         )}
 
-        {gameId === 'sprint' && (
+        {(gameId === 'sprint' || gameId === 'sprintduel') && (
           <div className="sprint-board">
-            <div className="sprint-score"><span><small>YOUR TAPS</small><b>{sprintCount}</b></span><strong>{phase === 'sprint' ? `00:0${secondsLeft}` : '00:08'}</strong><span><small>ROUND</small><b>01</b></span></div>
-            {phase === 'result' ? <ResultPanel result={result} onAgain={restartStandard} /> : phase === 'sprint' ? <button className="sprint-tap" onClick={tapSprint} aria-label="Tap to sprint"><span>+</span><small>KEEP TAPPING</small></button> : <><p className="game-instruction">Bank two Credits per tap. A fast little thumb is an asset.</p><button className="button button-dark button-wide" onClick={startSprint}>Start 8-second sprint <span>↗</span></button></>}
-            <div className="micro-rule"><span>CAP: 40 CR</span><span>NO MULTIPLIER / NO STAKE</span></div>
+            <div className="sprint-score"><span><small>YOUR TAPS</small><b>{sprintCount}</b></span><strong>{phase === 'sprint' ? `00:0${secondsLeft}` : '00:08'}</strong><span><small>{gameId === 'sprintduel' ? 'RIVAL TAPS' : 'ROUND'}</small><b>{gameId === 'sprintduel' ? opponentSprintCount : '01'}</b></span></div>
+            {phase === 'result' ? <ResultPanel result={result} onAgain={restartStandard} /> : phase === 'sprint' ? <button className="sprint-tap" onClick={tapSprint} aria-label="Tap to sprint"><span>+</span><small>KEEP TAPPING</small></button> : <><p className="game-instruction">{gameId === 'sprintduel' ? `Beat ${opponent?.username || 'your rival'}’s ${opponentSprintCount} taps in eight seconds.` : 'Bank two Credits per tap. A fast little thumb is an asset.'}</p><button className="button button-dark button-wide" onClick={startSprint}>Start 8-second sprint <span>↗</span></button></>}
+            <div className="micro-rule"><span>{gameId === 'sprintduel' ? 'FAF · FRIENDLY TAP RACE' : 'CAP: 40 CR'}</span><span>{gameId === 'sprintduel' ? '8 SECONDS · NO ENTRY FEE' : 'NO MULTIPLIER / NO STAKE'}</span></div>
           </div>
         )}
 
@@ -380,15 +519,17 @@ export default function GameModal({ gameId, user, db, opponent, onClose, onCompl
           </div>
         )}
 
-        {gameId === 'duel' && (
+        {(gameId === 'duel' || gameId === 'rally') && (
           <div className="duel-board">
             {phase === 'result' ? <ResultPanel result={result} onAgain={restartStandard} /> : <>
               <div className="duel-matchup"><div><span className="avatar">{String(user.username).slice(0, 1)}</span><small>YOU</small><b>{user.username}</b></div><i>VS</i><div><span className="avatar avatar-rival">{String(opponent?.username || 'F').slice(0, 1)}</span><small>RANDOM FLOOR</small><b>{opponent?.username || 'A new face'}</b></div></div>
-              <p className="game-instruction">One random share gets one next-tick call. Choose your direction. No entry fee.</p>
+              {gameId === 'rally' && <div className="rally-scoreboard"><span>{rallyPlayerScore}</span><small>ROUND {rallyRound} / 3</small><span>{rallyRivalScore}</span></div>}
+              <p className="game-instruction">{gameId === 'rally' ? `Round ${rallyRound} of 3. Call the next market tick; correct calls move your side up.` : 'One random share gets one next-tick call. Choose your direction. No entry fee.'}</p>
               <div className="side-picks forecast-picks"><button onClick={() => settleForecast(true, 'up')} disabled={phase === 'thinking'}><small>▲ THE CALL</small><b>UP</b></button><button onClick={() => settleForecast(true, 'down')} disabled={phase === 'thinking'}><small>▼ THE CALL</small><b>DOWN</b></button></div>
               {phase === 'thinking' && <div className="waiting-note"><i className="loader-dot" /> {message}</div>}
+              {gameId === 'rally' && phase === 'round-ready' && <div className="inline-feedback">{message}</div>}
             </>}
-            <div className="micro-rule"><span>FAF · FIND A FRIEND</span><span>WIN: 40 CR + 5 LP</span></div>
+            <div className="micro-rule"><span>FAF · {gameId === 'rally' ? 'BEST OF THREE' : 'FIND A FRIEND'}</span><span>{gameId === 'rally' ? 'UP TO 60 CR · NO ENTRY FEE' : 'WIN: 40 CR + 5 LP'}</span></div>
           </div>
         )}
         <p className="game-legal">FINB is a fictional game. All Credits and Liberals are in-game points with no monetary value.</p>

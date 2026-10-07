@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import GameModal from './components/GameModal.jsx';
+import { ComingSoonShelf, CursorController, VaultTransition, WorldAtmosphere } from './components/WorldEffects.jsx';
 import {
   STOCKS,
   BUSINESSES,
@@ -75,6 +76,7 @@ export default function App() {
   const [page, setPage] = useState('overview');
   const [mode, setMode] = useState('guest');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [teleporting, setTeleporting] = useState(false);
   const [toast, setToast] = useState(null);
   const [modal, setModal] = useState(null);
   const [cardRevealed, setCardRevealed] = useState(false);
@@ -85,6 +87,7 @@ export default function App() {
   const [marketWindow, setMarketWindow] = useState('DAY');
   const [marketSearch, setMarketSearch] = useState('');
   const toastTimer = React.useRef(null);
+  const teleportTimers = React.useRef([]);
 
   useEffect(() => {
     dbRef.current = db;
@@ -112,7 +115,10 @@ export default function App() {
     toastTimer.current = window.setTimeout(() => setToast(null), 3600);
   }, []);
 
-  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(toastTimer.current);
+    teleportTimers.current.forEach(timer => window.clearTimeout(timer));
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -130,9 +136,20 @@ export default function App() {
   }, [commit]);
 
   const navigate = (target) => {
-    setPage(target);
-    setDrawerOpen(false);
-    setCardRevealed(false);
+    if (target === page) {
+      setDrawerOpen(false);
+      return;
+    }
+    teleportTimers.current.forEach(timer => window.clearTimeout(timer));
+    setTeleporting(true);
+    teleportTimers.current = [
+      window.setTimeout(() => {
+        setPage(target);
+        setDrawerOpen(false);
+        setCardRevealed(false);
+      }, 150),
+      window.setTimeout(() => setTeleporting(false), 820),
+    ];
   };
 
   const openDocuments = (section = 'guide') => {
@@ -243,7 +260,7 @@ export default function App() {
 
   const openGame = (gameId) => {
     let opponent = null;
-    if (gameId === 'duel') {
+    if (['duel', 'rally', 'quizduel', 'sprintduel'].includes(gameId)) {
       const directory = getDirectory(db).filter(player => player.id !== user?.id);
       opponent = directory[Math.floor(Math.random() * directory.length)] || null;
     }
@@ -547,6 +564,7 @@ export default function App() {
   if (!user) {
     return (
       <>
+        <WorldAtmosphere />
         <EntryPage
           db={db}
           mode={mode}
@@ -558,12 +576,14 @@ export default function App() {
         />
         {page === 'documents' && <DocsModal section={docSection} setSection={setDocSection} onClose={() => setPage('overview')} />}
         {toast && <Toast toast={toast} />}
+        <CursorController />
       </>
     );
   }
 
   return (
     <>
+      <WorldAtmosphere />
       <div className={`app-layout ${drawerOpen ? 'drawer-open' : ''}`}>
         <Sidebar user={user} page={page} onNavigate={navigate} onSwitch={switchProfile} onDocuments={openDocuments} />
         {drawerOpen && <button className="drawer-scrim" aria-label="Close navigation" onClick={() => setDrawerOpen(false)} />}
@@ -587,6 +607,8 @@ export default function App() {
       {modal?.type === 'replace-card' && <ConfirmModal title="Reissue this game card?" description="The current fictional card number and CVV will be retired and replaced. This does not contact a card network." confirmLabel="Reissue card" onClose={() => setModal(null)} onConfirm={replaceCard} />}
       {modal?.type === 'delete-account' && <ConfirmModal title="Delete this local profile?" description="This permanently removes the profile and its in-browser game progress. It cannot be recovered. Linked identity claim records remain on this browser to prevent repeat welcome credits." confirmLabel="Delete local profile" danger onClose={() => setModal({ type: 'account' })} onConfirm={deleteLocalAccount} />}
       {toast && <Toast toast={toast} />}
+      <VaultTransition active={teleporting} onSkip={() => setTeleporting(false)} />
+      <CursorController />
     </>
   );
 }
@@ -653,9 +675,9 @@ function Sidebar({ user, page, onNavigate, onSwitch, onDocuments }) {
     <aside className="sidebar">
       <div className="sidebar-brand"><BrandLockup /></div>
       <div className="platinum-ribbon"><span>MEMBER STATUS</span><b>PLATINUM <i>✳</i></b></div>
-      <nav className="side-nav" aria-label="Main navigation">
-        <span className="side-section-label">THE PRIVATE FLOOR</span>
-        {NAV.map(item => <button key={item.id} className={`side-link ${page === item.id ? 'active' : ''}`} onClick={() => onNavigate(item.id)}><Icon name={item.icon} /><span>{item.label}</span>{item.id === 'arcade' && <b className="nav-count">08</b>}{page === item.id && <i className="nav-active-mark" />}</button>)}
+      <nav className="side-nav constellation-nav" aria-label="Main navigation">
+        <span className="side-section-label">DRAG A STAR / PICK A DESTINATION</span>
+        <ConstellationNav page={page} onNavigate={onNavigate} />
       </nav>
       <div className="sidebar-soon">
         <div className="sidebar-section-head"><span>ON THE HORIZON</span><span className="soon-dot" /></div>
@@ -665,6 +687,70 @@ function Sidebar({ user, page, onNavigate, onSwitch, onDocuments }) {
       <div className="sidebar-bottom-links"><button onClick={() => onDocuments('guide')}>The FINB papers <span>↗</span></button><button onClick={() => onDocuments('support')}>Support <span>cs</span></button></div>
       <button className="sidebar-player" onClick={onSwitch} title="Switch profile or add another local profile"><span className="avatar sidebar-avatar">{initials(user.username)}</span><span className="sidebar-player-details"><b>{user.username}</b><small>{user.linked ? 'PLAY GAMES LINKED' : 'GUEST PROFILE'}</small></span><span className="switch-icon">⇄</span></button>
     </aside>
+  );
+}
+
+function ConstellationNav({ page, onNavigate }) {
+  const [dragId, setDragId] = useState(null);
+  const [offsets, setOffsets] = useState({});
+  const [snappingId, setSnappingId] = useState(null);
+  const dragRef = React.useRef(null);
+  const suppressClick = React.useRef(null);
+  const snapTimer = React.useRef(null);
+  const positions = [
+    { left: '4%', top: '25%' }, { left: '37%', top: '0%' }, { left: '70%', top: '25%' },
+    { left: '4%', top: '61%' }, { left: '37%', top: '72%' }, { left: '70%', top: '61%' },
+  ];
+  const pointerDown = (event, id) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    dragRef.current = { id, x: event.clientX, y: event.clientY, moved: false };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragId(id);
+  };
+  const pointerMove = (event, id) => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== id) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (Math.hypot(dx, dy) > 4) drag.moved = true;
+    if (drag.moved) setOffsets(current => ({ ...current, [id]: { x: Math.max(-54, Math.min(54, dx)), y: Math.max(-54, Math.min(54, dy)) } }));
+  };
+  const pointerUp = id => {
+    const drag = dragRef.current;
+    if (!drag || drag.id !== id) return;
+    dragRef.current = null;
+    setDragId(null);
+    if (drag.moved) {
+      suppressClick.current = id;
+      setSnappingId(id);
+      window.clearTimeout(snapTimer.current);
+      snapTimer.current = window.setTimeout(() => {
+        setOffsets(current => ({ ...current, [id]: { x: 0, y: 0 } }));
+        setSnappingId(null);
+        suppressClick.current = null;
+      }, 210);
+    }
+  };
+  const openNode = (event, id) => {
+    if (suppressClick.current === id) {
+      event.preventDefault();
+      return;
+    }
+    onNavigate(id);
+  };
+  useEffect(() => () => window.clearTimeout(snapTimer.current), []);
+  return (
+    <div className="constellation-system">
+      <div className="constellation-ring constellation-ring-outer" />
+      <div className="constellation-ring constellation-ring-inner" />
+      <div className="constellation-core"><span>F</span><small>FINB<br />CORE</small></div>
+      {NAV.map((item, index) => <button key={item.id} className={`constellation-node ${page === item.id ? 'active' : ''} ${dragId === item.id ? 'is-dragging' : ''} ${snappingId === item.id ? 'is-snapping' : ''}`} style={{ ...positions[index], '--drag-x': `${offsets[item.id]?.x || 0}px`, '--drag-y': `${offsets[item.id]?.y || 0}px`, '--node-index': index }} onPointerDown={event => pointerDown(event, item.id)} onPointerMove={event => pointerMove(event, item.id)} onPointerUp={() => pointerUp(item.id)} onPointerCancel={() => pointerUp(item.id)} onClick={event => openNode(event, item.id)} aria-label={`${item.label}${page === item.id ? ', current page' : ''}. Drag to play with the constellation.`} title={`${item.label} · drag to reposition, release to snap`}>
+        <span className="constellation-node-orb"><Icon name={item.icon} />{item.id === 'arcade' && <i className="orb-game-count">{String(GAMES.length).padStart(2, '0')}</i>}</span>
+        <small>{item.label}</small>
+        {page === item.id && <b className="orb-active-pip" />}
+      </button>)}
+      <span className="constellation-instruction">MAGNETIC NAV / DRAG & SNAP</span>
+    </div>
   );
 }
 
@@ -736,6 +822,7 @@ function OverviewPage({ user, db, onNavigate, onClaim, onPlay, onCard, cardRevea
         <div className="content-panel activity-panel"><div className="section-head"><div><span className="eyebrow">YOUR LEDGER / LIVE</span><h2>Recent movement</h2></div><button className="inline-arrow" onClick={() => onNavigate('rewards')}>ALL ACTIVITY <span>↗</span></button></div>{activity.length ? <div className="activity-list">{activity.map(item => <ActivityRow item={item} key={item.id} />)}</div> : <div className="empty-state"><span>◌</span><b>Your ledger is quiet.</b><small>Claim a daily reward or try a game to start a little movement.</small></div>}</div>
         <div className="content-panel market-snapshot"><div className="section-head"><div><span className="eyebrow">THE FICTIONAL EXCHANGE</span><h2>Market, today</h2></div><button className="inline-arrow" onClick={() => onNavigate('markets')}>OPEN LAB <span>↗</span></button></div><div className="snapshot-quote"><div><span className="quote-symbol">NVA</span><b>Nova Energy</b><small>Clean power / simulated share</small></div><div className="quote-last"><b>{formatCredits(quote.price, 2)}<small> cr</small></b><em className={trend.up ? 'positive' : 'negative'}>{trend.up ? '+' : ''}{trend.percent.toFixed(2)}%</em></div></div><div className="snapshot-chart"><Sparkline values={quote.series} color={trend.up ? '#9ebb5a' : '#e28b75'} /></div><div className="snapshot-foot"><span><i className="live-pip" /> RANDOM-WALK PRICE FEED</span><button onClick={() => onNavigate('markets')}>Trade the simulation <span>↗</span></button></div></div>
       </section>
+      <ComingSoonShelf />
     </div>
   );
 }
@@ -767,6 +854,10 @@ function ActivityRow({ item }) {
   return <div className="activity-row"><span className={`activity-icon activity-${item.kind}`}>{activityGlyph(item.kind)}</span><span className="activity-label"><b>{item.title}</b><small>{formatDateTime(item.at)}</small></span>{amount == null ? <span className="activity-kind">{String(item.kind || 'NOTE').toUpperCase()}</span> : <b className={`activity-amount ${amount >= 0 ? 'positive' : 'negative'}`}>{amount > 0 ? '+' : ''}{formatCredits(amount, Number.isInteger(amount) ? 0 : 2)} <small>cr</small></b>}</div>;
 }
 
+function SharedActivityRow({ item }) {
+  return <div className="shared-feed-row"><span className="shared-feed-avatar">{initials(item.playerName)}</span><span className="shared-feed-label"><b>{item.playerName}</b><span>{item.title}</span></span><small>{formatDateTime(item.at)}</small><i>{activityGlyph(item.kind)}</i></div>;
+}
+
 function activityGlyph(kind) {
   return ({ reward: '✳', game: '↗', transfer: '↔', trade: '⌁', business: '◈', referral: '⊹', achievement: '✳', social: '◌', card: '▱' })[kind] || '·';
 }
@@ -776,10 +867,10 @@ function ArcadePage({ filter, setFilter, onPlay, user }) {
   const games = GAMES.filter(game => filter === 'All' || game.category.toLowerCase() === filter.toLowerCase());
   return (
     <div className="page-stack arcade-page">
-      <div className="page-intro-row arcade-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> HOUSE OF PLAY / 08 GAMES</div><h1>The floor is <em>open.</em></h1><p>Earn Credits. Collect Liberals. Leave a little better at something.</p></div><div className="arcade-score"><span>YOUR FLOOR RECORD</span><b>{user.stats.gamesWon}<small> / {user.stats.gamesPlayed}</small></b><small>WINS / ROUNDS PLAYED</small></div></div>
+      <div className="page-intro-row arcade-intro"><div><div className="eyebrow"><span className="eyebrow-line" /> HOUSE OF PLAY / {String(GAMES.length).padStart(2, '0')} GAMES</div><h1>The floor is <em>open.</em></h1><p>Earn Credits. Collect Liberals. Leave a little better at something.</p></div><div className="arcade-score"><span>YOUR FLOOR RECORD</span><b>{user.stats.gamesWon}<small> / {user.stats.gamesPlayed}</small></b><small>WINS / ROUNDS PLAYED</small></div></div>
       <section className="arcade-feature"><div className="feature-art"><div className="feature-target"><span>FAF</span><i>✳</i></div><div className="feature-orbit feature-orbit-a" /><div className="feature-orbit feature-orbit-b" /><span className="feature-art-sticker">NO ENTRY FEE</span></div><div className="feature-copy"><span className="eyebrow"><i className="online-pip" /> FEATURED / MULTIPLAYER</span><h2>Find your<br /><em>friendly rival.</em></h2><p>One randomly matched player. One market call. No stake to lose, just a new name to learn.</p><div className="feature-foot"><button className="button button-lime" onClick={() => onPlay('duel')}>Find a random match <span>↗</span></button><span>FAF · FIND A FRIEND</span></div></div><div className="feature-id">PLAY ID / 08—FAF</div></section>
-      <div className="section-head arcade-section-head"><div><span className="eyebrow">CHOOSE YOUR LITTLE OBSESSION</span><h2>Eight ways to play.</h2></div><div className="filter-pills" role="tablist" aria-label="Filter games">{filters.map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div>
-      <section className="game-catalog">{games.map((game, index) => <article key={game.id} className={`game-tile game-tile-${game.id}`}><div className="game-tile-top"><span className={`game-tile-icon tile-icon-${game.id}`}>{game.icon}</span><span className="game-tile-index">0{GAMES.indexOf(game) + 1} / 08</span></div><span className="eyebrow game-tile-tag">{game.tag}</span><h3>{game.title}</h3><p>{game.copy}</p><div className="game-tile-bottom"><span>{game.reward}</span><button aria-label={`Play ${game.title}`} onClick={() => onPlay(game.id)}>PLAY <span>↗</span></button></div><span className="tile-ghost-number">0{index + 1}</span></article>)}</section>
+      <div className="section-head arcade-section-head"><div><span className="eyebrow">CHOOSE YOUR LITTLE OBSESSION</span><h2>{GAMES.length} ways to play.</h2></div><div className="filter-pills" role="tablist" aria-label="Filter games">{filters.map(item => <button key={item} className={filter === item ? 'active' : ''} onClick={() => setFilter(item)}>{item}</button>)}</div></div>
+      <section className="game-catalog">{games.map((game, index) => <article key={game.id} className={`game-tile game-tile-${game.id}`}><div className="game-tile-top"><span className={`game-tile-icon tile-icon-${game.id}`}>{game.icon}</span><span className="game-tile-index">{String(GAMES.indexOf(game) + 1).padStart(2, '0')} / {String(GAMES.length).padStart(2, '0')}</span></div><span className="eyebrow game-tile-tag">{game.tag}</span><h3>{game.title}</h3><p>{game.copy}</p><div className="game-tile-bottom"><span>{game.reward}</span><button aria-label={`Play ${game.title}`} onClick={() => onPlay(game.id)}>PLAY <span>↗</span></button></div><span className="tile-ghost-number">{String(index + 1).padStart(2, '0')}</span></article>)}</section>
       <div className="arcade-fairplay"><span>✳</span><p><b>Friendly-floor promise.</b> Games run in this browser-only prototype. Match opponents are simulated players or other profiles on this device; this is not online matchmaking.</p><button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Back to top ↑</button></div>
     </div>
   );
@@ -842,6 +933,11 @@ function SocialPage({ user, db, rankBy, setRankBy, onAddFriend, onTransfer, onRe
   const friends = user.friends.map(name => directory.find(player => player.username.toLowerCase() === name.toLowerCase())).filter(Boolean);
   const leaderboard = [...directory].sort((a, b) => (rankBy === 'credits' ? b.credits - a.credits || b.liberals - a.liberals : b.liberals - a.liberals || b.credits - a.credits)).slice(0, 8);
   const options = directory.filter(player => player.id !== user.id).map(player => player.username);
+  const sharedActivity = friends.flatMap(player => {
+    const events = (player.activity || []).slice(0, 3).map(item => ({ ...item, playerName: player.username }));
+    if (!events.length && player.simulated) return [{ id: `floor-${player.id}`, playerName: player.username, title: player.status, kind: 'social', at: Date.now() - 60000 * (directory.indexOf(player) + 1), amount: null }];
+    return events;
+  }).sort((a, b) => b.at - a.at).slice(0, 6);
   return (
     <div className="page-stack social-page">
       <div className="page-intro-row"><div><div className="eyebrow"><span className="eyebrow-line" /> FINB SOCIAL / USERNAME-BASED</div><h1>Better together.<br /><em>Even in pretend.</em></h1><p>Find a familiar face, send a little Credit, or see who is collecting Liberals.</p></div><button className="button button-dark social-cta" onClick={onMatch}><span className="online-pip" /> Find a random match <span>↗</span></button></div>
@@ -853,6 +949,7 @@ function SocialPage({ user, db, rankBy, setRankBy, onAddFriend, onTransfer, onRe
         <div className="leaderboard-panel content-panel"><div className="section-head"><div><span className="eyebrow">A LITTLE FRIENDLY COMPETITION</span><h2>The daily table.</h2></div><div className="rank-toggle"><button className={rankBy === 'credits' ? 'active' : ''} onClick={() => setRankBy('credits')}>CREDITS</button><button className={rankBy === 'liberals' ? 'active' : ''} onClick={() => setRankBy('liberals')}>LIBERALS</button></div></div><div className="leaderboard-table"><div className="leaderboard-labels"><span>RANK / PLAYER</span><span>{rankBy === 'credits' ? 'CREDITS' : 'LIBERALS'}</span></div>{leaderboard.map((player, index) => <div className={`leaderboard-row ${player.id === user.id ? 'is-you' : ''}`} key={player.id}><span className={`rank-number rank-${index + 1}`}>{String(index + 1).padStart(2, '0')}</span><span className="leader-user"><span className="avatar avatar-small">{initials(player.username)}</span><b>{player.username}{player.id === user.id && <i>YOU</i>}</b><small>{player.simulated ? 'SIMULATED PLAYER' : player.linked ? 'PLAY GAMES' : 'GUEST'}</small></span><b className="leader-score">{formatCompact(rankBy === 'credits' ? player.credits : player.liberals)}<small>{rankBy === 'credits' ? ' cr' : ' LP'}</small></b><span className="leader-arrow">↗</span></div>)}</div><p className="leaderboard-note">Scores include fictional floor profiles to keep the board lively. Simulated players are clearly marked.</p></div>
         <div className="referral-card"><div className="referral-orbit"><span>⊹</span></div><span className="eyebrow">THE NICEST LOOP</span><h2>Bring a friend.<br /><em>Both leave richer.</em></h2><p>Link a unique Play Games profile, share your code, and make an actual introduction.</p><div className="referral-code"><span><small>YOUR LOCAL INVITE CODE</small><b>{user.referralCode}</b></span><button aria-label="Copy invite code" onClick={() => onCopy(user.referralCode, 'Invite code')}>COPY ↗</button></div><div className="referral-reward-row"><span><b>+100 cr</b><small>YOU GET</small></span><i>↔</i><span><b>+200 cr</b><small>NEW LINKED FRIEND</small></span></div><form className="referral-claim-form" onSubmit={onReferral}><label htmlFor="claim-referral">HAVE A FRIEND’S CODE?</label><div><input id="claim-referral" name="referralCode" placeholder="FINB-______" maxLength={11} /><button type="submit" aria-label="Claim invite code">↗</button></div><small>One claim per linked profile. Codes resolve inside this browser demo.</small></form></div>
       </section>
+      <section className="shared-pulse-panel content-panel"><div className="section-head"><div><span className="eyebrow"><i className="online-pip" /> FRIEND-SIGNAL / LIVE ON THIS DEVICE</span><h2>Little things they’re up to.</h2></div><span className="friend-count">LOCAL ACTIVITY FEED</span></div>{sharedActivity.length ? <div className="shared-feed-list">{sharedActivity.map(item => <SharedActivityRow item={item} key={item.id} />)}</div> : <div className="empty-state shared-empty"><span>✦</span><b>Your friend-signal is quiet.</b><small>Add a player to see their in-game milestones here.</small></div>}</section>
       <div className="social-disclaimer"><span>✳</span><p><b>Just between us (and this device).</b> “Local FINB network” means accounts saved in this browser. There is no server, real online matchmaking, or connection to Play Games yet.</p></div>
     </div>
   );
@@ -906,7 +1003,7 @@ function renderDocument(section, onSupport) {
   if (section === 'terms') return <><span className="eyebrow">TERMS / A FRIENDLY BUT IMPORTANT READ</span><h2>Terms & conditions.</h2><p className="doc-lede">These are prototype terms to explain the experience. They have not been reviewed for your jurisdiction and are not a substitute for counsel.</p><h3>1. What FINB is</h3><p>Fake International Bank (FINB) in this build is a fictional browser game and educational-style simulation. It is not a bank, payment service, financial institution, broker, lender, investment adviser, or Google product. No real account or payment card is issued.</p><h3>2. Credits, Liberals & fictional assets</h3><p>Credits, Liberals, cards, shares, companies, and game rewards are virtual game data with no real-world monetary value. They cannot be redeemed, transferred outside this prototype, sold, or used to buy goods or services. Simulated share performance is not a prediction or investment recommendation.</p><h3>3. Your local profile</h3><p>You are responsible for choosing a non-sensitive username and protecting access to the browser profile. Do not impersonate others or use the interface to collect their private credentials. Guest profiles may be removed after 90 days. This prototype can be changed, interrupted, or reset at any time.</p><h3>4. Acceptable use</h3><p>Do not attempt to mislead anyone into believing the fictional card is a payment instrument, scrape or alter other people’s data, interfere with the application, or use the name to suggest affiliation with a real financial institution. No real card details or passwords should be entered.</p><h3>5. Availability & liability</h3><p>The game is supplied as-is for demonstration. To the extent allowed by applicable law, no warranty is made about availability, data persistence, fitness for a particular purpose, or accuracy of the simulations. Nothing here limits rights that cannot lawfully be excluded.</p><h3>6. Governing law & changes</h3><p>No launch jurisdiction, governing law, dispute process, or legal operator has been configured for this prototype. A production publisher must insert those details after local legal review. These disclosures may be revised as the product changes.</p><h3>7. Contact</h3><p>The only support label supplied for this concept is “CNAME: cs”. It is not yet a verified mailbox or active customer-support service. Do not send sensitive information to an unverified address.</p></>;
   if (section === 'brand') return <><span className="eyebrow">NAME, IDEA & CREATIVE WORK</span><h2>What we can — and can’t — promise.</h2><p className="doc-lede">A website notice cannot magically grant exclusive rights over a name or a general idea. We will not pretend otherwise.</p><h3>No legal guarantee of exclusivity</h3><p>This prototype does not claim that “Fake International Bank,” “FINB,” the concept, or any associated name is registered, available, or exclusively owned in any country. A disclaimer, footer, or website launch does not by itself guarantee protection from use by others or establish a monopoly over a general idea.</p><h3>Copyright</h3><p>Original text, artwork, and code may receive copyright protection automatically in many jurisdictions, subject to local law and authorship. Copyright generally protects a particular expression, not a name, system, method, or abstract game idea. This notice is information, not legal advice or a registration.</p><h3>Trademarks & patents</h3><p>Brand protection depends on the facts and jurisdiction. Trademark rights, clearance, registration, and enforceability vary; a name should be searched before launch. Patents do not ordinarily protect a bare abstract idea, and eligibility is technical and jurisdiction-specific. No trademark or patent application is asserted here.</p><h3>Practical next steps before launch</h3><ol><li>Search company, domain, app store, and trademark records in target markets.</li><li>Ask a qualified local IP lawyer to assess name clearance and protectable assets.</li><li>Keep dated authorship and licensing records for original code, design, and content.</li><li>Replace this disclosure with reviewed notices and the correct legal operator details.</li></ol><p className="doc-callout"><b>In short:</b> we can describe the project honestly, but cannot promise the name, idea, or site is “protected by law” without the necessary rights, evidence, and jurisdiction-specific advice.</p></>;
   if (section === 'support') return <><span className="eyebrow">A REAL PERSON WOULD BE NICE</span><h2>Support, with the honest version.</h2><p className="doc-lede">Requested support route: <b>CNAME: cs</b>.</p><h3>Current status</h3><p>This prototype has no configured customer-support mailbox, CNAME record, support team, or ticket service. The text “cs” is shown as a supplied alias only; it is not a resolvable web address or verified contact.</p><h3>When a support channel is configured</h3><p>Publish a real domain-controlled contact, response expectations, privacy notice, and escalation route. Never ask players to email a password, payment credential, or Google sign-in code. For this local demo, try refreshing the page to restore the saved in-browser profile; deleting site data will erase it.</p><button className="button button-dark doc-support-button" onClick={onSupport}>Read the getting-started guide <span>↗</span></button></>;
-  return <><span className="eyebrow">A SMALL FIELD GUIDE / VERSION PLATINUM</span><h2>Welcome to the made-up money.</h2><p className="doc-lede">FINB ESTD. 2024 is a fictional economy built for play, experimentation, and gentle financial learning.</p><h3>Start here</h3><ol><li>Create a custom username. Guest accounts start with zero Credits and expire from this browser after 90 days unless linked.</li><li>Choose “Play Games link” to enter a unique demo tag. This front-end does not perform real Google authentication. The first unclaimed tag gets a one-time 100 Credit welcome award.</li><li>Claim the daily login reward yourself: 10 Credits per day, plus milestone bonuses at 7, 14, 30, and 60 consecutive days.</li><li>Play the eight mini-games, explore the random-walk share market, open a little business, add a friend, or drop into an FAF match.</li></ol><h3>What are the scores?</h3><p><b>Credits</b> are the spendable game points used by market trades, small businesses, and username-based transfers. <b>Liberals</b> are earned achievement points; the term is non-political, non-transferable, and has no cash value.</p><h3>Card details</h3><p>Your Platinum card has a unique in-game number, CVV, expiry, holder, and freeze/reissue controls. They are deliberately fictional. No real card network, bank account, checkout, or payment authorization exists.</p><h3>Friends & FAF</h3><p>Profiles and transfers are local to this browser. The leaderboard includes simulated floor characters marked as such. Random matches are bot-style local opponents, not live multiplayer.</p><h3>Play responsibly</h3><p>No real money is accepted, earned, invested, or lost. Market activity is a random simulation, not financial advice. Vault 21 is virtual-credit gameplay only.</p><p className="doc-callout"><b>For builders:</b> see <code>README.md</code> for the framework, local data model, security limits, and production integration checklist.</p></>;
+  return <><span className="eyebrow">A SMALL FIELD GUIDE / VERSION PLATINUM</span><h2>Welcome to the made-up money.</h2><p className="doc-lede">FINB ESTD. 2024 is a fictional economy built for play, experimentation, and gentle financial learning.</p><h3>Start here</h3><ol><li>Create a custom username. Guest accounts start with zero Credits and expire from this browser after 90 days unless linked.</li><li>Choose “Play Games link” to enter a unique demo tag. This front-end does not perform real Google authentication. The first unclaimed tag gets a one-time 100 Credit welcome award.</li><li>Claim the daily login reward yourself: 10 Credits per day, plus milestone bonuses at 7, 14, 30, and 60 consecutive days.</li><li>Play {GAMES.length} mini-games, explore the random-walk share market, open a little business, add a friend, or drop into one of the FAF multiplayer modes.</li></ol><h3>What are the scores?</h3><p><b>Credits</b> are the spendable game points used by market trades, small businesses, and username-based transfers. <b>Liberals</b> are earned achievement points; the term is non-political, non-transferable, and has no cash value.</p><h3>Card details</h3><p>Your Platinum card has a unique in-game number, CVV, expiry, holder, and freeze/reissue controls. They are deliberately fictional. No real card network, bank account, checkout, or payment authorization exists.</p><h3>Friends & FAF</h3><p>Profiles and transfers are local to this browser. The leaderboard includes simulated floor characters marked as such. Random matches are bot-style local opponents, not live multiplayer.</p><h3>Play responsibly</h3><p>No real money is accepted, earned, invested, or lost. Market activity is a random simulation, not financial advice. Vault 21 is virtual-credit gameplay only.</p><p className="doc-callout"><b>For builders:</b> see <code>README.md</code> for the framework, local data model, security limits, and production integration checklist.</p></>;
 }
 
 function Footer({ onDocuments }) {

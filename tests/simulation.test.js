@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  GAMES,
   STOCKS,
   createAccount,
   getBusinessEarnings,
@@ -48,6 +49,15 @@ test('business yields are time-based and cap at twelve hours', () => {
   assert.equal(getBusinessEarnings(venture, now), 200);
   const overdue = { yieldPerMinute: 2, lastCollectedAt: now - (24 * 60 * 60 * 1000) };
   assert.equal(getBusinessEarnings(overdue, now), 1440);
+});
+
+test('the play floor offers a deep, unique game catalog', () => {
+  const ids = GAMES.map(game => game.id);
+  assert.ok(GAMES.length >= 27, `expected at least 27 games, found ${GAMES.length}`);
+  assert.equal(new Set(ids).size, ids.length);
+  const multiplayer = GAMES.filter(game => game.category === 'FAF MULTIPLAYER');
+  assert.ok(multiplayer.length >= 4, 'expected four FAF multiplayer formats');
+  assert.ok(GAMES.filter(game => game.category === 'Learn').length >= 5, 'expected several educational games');
 });
 
 test('market ticks stay positive and keep a bounded history', () => {

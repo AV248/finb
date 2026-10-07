@@ -1,6 +1,6 @@
 # FINB Platinum — Fake International Bank
 
-FINB is a fictional, browser-based game economy — **not a bank, payment service, brokerage, or real multiplayer network**. It is built as a polished interactive prototype in React and Vite.
+FINB is a fictional, browser-based game economy — **not a bank, payment service, brokerage, or real multiplayer network**. It is built as a polished interactive prototype in React and Vite, with an isometric neon-city backdrop, draggable constellation navigation, glassy arcade panels, vault-teleport page changes, particle trails, and a responsive custom crystal cursor.
 
 ## Run locally
 
@@ -23,7 +23,7 @@ npm test
 - **Play Games demo link:** entering a unique tag simulates linking; there is no Google Play Games OAuth, API request, account verification, or password collection. The first unclaimed tag in this browser receives 100 Credits once. A later guest-to-linked upgrade can claim that same one-time bonus.
 - **Platinum game card:** a unique 16-digit fictional number, CVV, expiry, holder, reveal/copy, freeze and reissue controls. It cannot authorize purchases or connect to a card network.
 - **Credits & Liberals:** manual daily login claims award 10 Credits; consecutive day 7/14/30/60 bonuses award an additional 30/75/200/500 Credits. Liberals (LP) are non-transferable, non-political achievement points.
-- **Eight games:** reaction timing, a four-digit code puzzle, money-literacy quiz, memory sequence, tap sprint, virtual-credit dice game, simulated market forecast, and FAF-style random match. Match opponents may be local profiles or visibly identified simulated floor characters.
+- **27 playable games:** eight featured modes (reaction, cipher, quiz, memory, tap sprint, virtual-credit dice, market forecast, and match) plus sixteen bite-sized financial skill challenges. Four FAF multiplayer formats include one-call duel, best-of-three rally, quiz ladder, and tap sprint. Opponents are other local profiles or visibly identified simulated floor characters.
 - **Market lab:** five random-walk share prices, whole-share buy/sell orders, portfolio basis/P&L, and three small yield-generating business simulations.
 - **Social:** local username directory, friends, simulated player leaderboard, username-based Credit transfers, invitation codes and linked-profile referral rewards.
 - **In-app papers:** getting-started guide, privacy, accountability, terms, brand/IP note, and support status. The same build includes explicit warnings that this is a simulation.
