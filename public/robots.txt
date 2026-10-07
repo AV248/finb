@@ -1,0 +1,8 @@
+# FINB — Fake International Bank (ESTD. 2024 · Platinum edition)
+# A fictional game-bank. No real banking, card processing or financial services.
+User-agent: *
+Allow: /
+Disallow: /_next/static/chunks/
+
+# Support alias: CNAME cs
+Sitemap: /sitemap.xml

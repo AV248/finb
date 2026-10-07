@@ -1,19 +1,61 @@
 {
-  "name": "finb-platinum-simulation",
+  "name": "finb-platinum",
   "version": "1.0.0",
   "private": true,
+  "description": "FINB \u2014 Fake International Bank: a fictional, installable game-bank simulation (FINB ESTD. 2024, Platinum).",
   "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0",
-    "test": "node --test"
+    "dev": "next dev --hostname 0.0.0.0 --port 5173",
+    "build": "next build",
+    "start": "serve out -l 5173 --single",
+    "export": "next build",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "server": "tsx server/index.ts",
+    "icons": "node scripts/make-icons.mjs",
+    "preview": "npm run build && npm run start",
+    "smoke": "node scripts/smoke-dom.mjs",
+    "test:node": "node --test --experimental-strip-types tests/economy.test.ts",
+    "test:live": "node scripts/live-session-test.mjs"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "6.1.2",
-    "vite": "8.3.3",
+    "@colyseus/sdk": "0.18.5",
+    "@supabase/supabase-js": "2.117.2",
+    "framer-motion": "12.23.24",
+    "next": "15.5.27",
+    "phaser": "3.90.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@colyseus/core": "0.18.18",
+    "@colyseus/ws-transport": "0.18.4",
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "22.18.9",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.1",
+    "@types/ws": "8.18.1",
+    "jsdom": "^30.1.2",
+    "serve": "^14.2.6",
+    "sharp": "0.35.5",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3",
+    "ws": "8.22.0"
+  },
+  "browserslist": [
+    "chrome >= 100",
+    "safari >= 16",
+    "firefox >= 100",
+    "edge >= 100"
+  ],
+  "overrides": {
+    "framer-motion": {
+      "motion-dom": "12.23.23",
+      "motion-utils": "12.23.6"
+    }
+  }
 }

@@ -1,0 +1,2 @@
+# SPA fallback for hosts that support _redirects (Netlify / Cloudflare Pages).
+/offline /index.html 200
